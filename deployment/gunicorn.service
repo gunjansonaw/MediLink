@@ -1,0 +1,18 @@
+[Unit]
+Description=Gunicorn daemon for MediLink Django application
+After=network.target
+
+[Service]
+User=ubuntu
+Group=www-data
+WorkingDirectory=/var/www/medilink/backend
+Environment="PATH=/var/www/medilink/backend/venv/bin"
+ExecStart=/var/www/medilink/backend/venv/bin/gunicorn \
+          --workers 3 \
+          --bind 127.0.0.1:8000 \
+          medilink.wsgi:application \
+          --access-logfile /var/log/medilink/access.log \
+          --error-logfile /var/log/medilink/error.log
+
+[Install]
+WantedBy=multi-user.target
