@@ -32,7 +32,9 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         return Invoice.objects.none()
     
     def get_permissions(self):
-        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+        # Allow authenticated users to list/retrieve and allow patients to create
+        # payments for their own invoices. Only admins may update/partial_update/destroy.
+        if self.action in ['update', 'partial_update', 'destroy']:
             return [IsAdminUser()]
         return [permissions.IsAuthenticated()]
     
@@ -129,12 +131,19 @@ class PaymentViewSet(viewsets.ModelViewSet):
         return [permissions.IsAuthenticated()]
     
     def perform_create(self, serializer):
+        # Enforce that patients can only create payments for their own invoices
+        invoice = serializer.validated_data.get('invoice')
+        user = self.request.user
+
+        if user.role == 'patient' and invoice.patient != user:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied('Patients can only pay their own invoices')
+
         payment = serializer.save()
-        
-        # Check if invoice is fully paid
-        invoice = payment.invoice
+
+        # Update invoice payment status after saving payment
         total_paid = invoice.payments.aggregate(Sum('amount'))['amount__sum'] or 0
-        
+
         if total_paid >= invoice.total:
             invoice.status = 'paid'
             invoice.save()

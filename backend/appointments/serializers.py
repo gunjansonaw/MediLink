@@ -12,10 +12,10 @@ class AppointmentSerializer(serializers.ModelSerializer):
         fields = ['id', 'patient', 'doctor', 'patient_details', 'doctor_details',
                   'appointment_date', 'appointment_time', 'duration_minutes', 
                   'status', 'reason', 'notes', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'patient']
     
     def validate(self, attrs):
-        # Check if doctor is available at the requested time
+        # Get doctor from attrs, patient from request context if available
         doctor = attrs.get('doctor')
         appointment_date = attrs.get('appointment_date')
         appointment_time = attrs.get('appointment_time')

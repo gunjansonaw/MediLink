@@ -15,6 +15,13 @@ class PatientProfileSerializer(serializers.ModelSerializer):
         model = PatientProfile
         fields = ['blood_group', 'emergency_contact', 'emergency_contact_name', 
                   'allergies', 'chronic_conditions', 'insurance_provider', 'insurance_number']
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Make emergency fields optional when updating
+        if self.instance:
+            self.fields['emergency_contact'].required = False
+            self.fields['emergency_contact_name'].required = False
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -62,7 +69,15 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         
         if user.role == 'doctor' and doctor_profile_data:
             DoctorProfile.objects.create(user=user, **doctor_profile_data)
-        elif user.role == 'patient' and patient_profile_data:
+        elif user.role == 'patient':
+            # Always create patient profile, even if data is minimal
+            if not patient_profile_data:
+                patient_profile_data = {}
+            # Ensure emergency contact fields have defaults if not provided
+            if 'emergency_contact' not in patient_profile_data:
+                patient_profile_data['emergency_contact'] = ''
+            if 'emergency_contact_name' not in patient_profile_data:
+                patient_profile_data['emergency_contact_name'] = ''
             PatientProfile.objects.create(user=user, **patient_profile_data)
         
         return user

@@ -61,8 +61,8 @@ class PatientProfile(models.Model):
     
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='patient_profile')
     blood_group = models.CharField(max_length=3, choices=BLOOD_GROUP_CHOICES, blank=True)
-    emergency_contact = models.CharField(max_length=15)
-    emergency_contact_name = models.CharField(max_length=100)
+    emergency_contact = models.CharField(max_length=15, blank=True, default='')
+    emergency_contact_name = models.CharField(max_length=100, blank=True, default='')
     allergies = models.TextField(blank=True)
     chronic_conditions = models.TextField(blank=True)
     insurance_provider = models.CharField(max_length=100, blank=True)

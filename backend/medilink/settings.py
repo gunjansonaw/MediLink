@@ -4,7 +4,17 @@ Django settings for medilink project.
 
 from pathlib import Path
 from datetime import timedelta
-from decouple import config
+import os
+
+try:
+    from decouple import config
+except ImportError:
+    # Fallback if decouple is not available
+    def config(key, default=None, cast=None):
+        value = os.getenv(key, default)
+        if cast and value is not None:
+            return cast(value)
+        return value
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -19,7 +29,7 @@ SECRET_KEY = config('SECRET_KEY', default='django-insecure-your-secret-key-chang
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config('DEBUG', default=True, cast=bool)
 
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=lambda v: [s.strip() for s in v.split(',')])
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1,testserver', cast=lambda v: [s.strip() for s in v.split(',')])
 
 
 # Application definition

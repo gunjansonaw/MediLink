@@ -9,6 +9,7 @@ function Billing() {
   const [invoices, setInvoices] = useState([]);
   const [selectedInvoice, setSelectedInvoice] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [forceShowPay, setForceShowPay] = useState(false);
 
   useEffect(() => {
     fetchInvoices();
@@ -16,10 +17,16 @@ function Billing() {
 
   const fetchInvoices = async () => {
     try {
+      console.log('Fetching invoices from API...');
       const response = await api.get('/billing/invoices/');
-      setInvoices(response.data.results || response.data);
+      console.log('Invoices response:', response.data);
+      const invoiceData = response.data.results || response.data;
+      console.log('Setting invoices:', invoiceData);
+      setInvoices(invoiceData);
     } catch (error) {
       console.error('Error fetching invoices:', error);
+      console.error('Error response:', error.response?.data);
+      alert('Failed to load invoices. Check console for details.');
     } finally {
       setLoading(false);
     }
@@ -38,6 +45,31 @@ function Billing() {
     }
   };
 
+  const handlePay = async (invoice) => {
+    try {
+      const amountDue = parseFloat(invoice.amount_due ?? invoice.total);
+      if (!window.confirm(`Pay $${amountDue.toFixed(2)} for invoice ${invoice.invoice_number}?`)) return;
+
+      const payload = {
+        invoice: invoice.id,
+        amount: amountDue,
+        payment_method: 'online',
+        transaction_id: `WEB-${Date.now()}`,
+      };
+
+      await api.post('/billing/payments/', payload);
+      // Refresh invoices and selected invoice
+      const resp = await api.get(`/billing/invoices/${invoice.id}/`);
+      // update invoice list
+      fetchInvoices();
+      setSelectedInvoice(resp.data);
+      alert('Payment recorded successfully');
+    } catch (error) {
+      console.error('Payment error:', error);
+      alert('Payment failed. See console for details.');
+    }
+  };
+
   if (loading) {
     return <div className="loading">Loading billing information...</div>;
   }
@@ -46,6 +78,23 @@ function Billing() {
     <div className="billing-page">
       <div className="page-header">
         <h1>Billing & Invoices</h1>
+        <div className="debug-controls">
+          <label style={{fontSize:12, marginLeft:10}}>
+            <input type="checkbox" checked={forceShowPay} onChange={(e) => setForceShowPay(e.target.checked)} />
+            {' '}Force show Pay (debug)
+          </label>
+        </div>
+      </div>
+
+      <div style={{ backgroundColor: '#f0f0f0', padding: '10px', margin: '10px', fontSize: '12px', border: '1px solid #ccc' }}>
+        <strong>DEBUG INFO:</strong>
+        <div>User: {user ? `${user.first_name} ${user.last_name} (role: ${user.role})` : 'NOT LOGGED IN'}</div>
+        {selectedInvoice && (
+          <div>
+            Selected Invoice: #{selectedInvoice.invoice_number} | Status: <strong>{selectedInvoice.status}</strong> | Amount Due: ${selectedInvoice.amount_due ?? selectedInvoice.total}
+          </div>
+        )}
+        <div>Pay Button Should Show: {selectedInvoice && selectedInvoice.status !== 'paid' ? '✓ YES' : '✗ NO'}</div>
       </div>
 
       <div className="billing-container">
@@ -83,10 +132,17 @@ function Billing() {
           <div className="invoice-details card">
             <div className="invoice-details-header">
               <h2>Invoice #{selectedInvoice.invoice_number}</h2>
-              <button className="btn btn-primary">
-                <Download size={16} />
-                Download PDF
-              </button>
+              <div className="invoice-actions">
+                {(forceShowPay || selectedInvoice.status !== 'paid') && (
+                  <button className="btn btn-success" onClick={() => handlePay(selectedInvoice)}>
+                    Pay Now
+                  </button>
+                )}
+                <button className="btn btn-primary">
+                  <Download size={16} />
+                  Download PDF
+                </button>
+              </div>
             </div>
 
             <div className="invoice-info-grid">

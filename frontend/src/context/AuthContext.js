@@ -20,11 +20,32 @@ export const AuthProvider = ({ children }) => {
     const token = localStorage.getItem('access_token');
     const savedUser = localStorage.getItem('user');
     
-    if (token && savedUser) {
-      setUser(JSON.parse(savedUser));
-    }
-    
-    setLoading(false);
+    const loadUser = async () => {
+      if (token && savedUser) {
+        setUser(JSON.parse(savedUser));
+        setLoading(false);
+        return;
+      }
+
+      if (token && !savedUser) {
+        try {
+          // Try to fetch current user from API when token exists
+          const resp = await api.get('/users/me/');
+          localStorage.setItem('user', JSON.stringify(resp.data));
+          setUser(resp.data);
+        } catch (err) {
+          // Token invalid or expired — clear local storage
+          localStorage.removeItem('access_token');
+          localStorage.removeItem('refresh_token');
+          localStorage.removeItem('user');
+          setUser(null);
+        }
+      }
+
+      setLoading(false);
+    };
+
+    loadUser();
   }, []);
 
   const login = async (username, password) => {
