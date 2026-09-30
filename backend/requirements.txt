@@ -13,3 +13,4 @@ redis==5.0.1
 django-filter==23.3
 drf-yasg==1.21.7
 setuptools>=65.5.0
+dj-database-url==2.1.0

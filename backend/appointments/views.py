@@ -1,4 +1,4 @@
-from rest_framework import viewsets, permissions, status
+from rest_framework import viewsets, permissions, status, serializers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.utils import timezone
@@ -18,17 +18,34 @@ class AppointmentViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
+        base_qs = Appointment.objects.select_related(
+            'patient', 'doctor', 'patient__patient_profile', 'doctor__doctor_profile'
+        )
         if user.role == 'admin':
-            return Appointment.objects.all()
+            return base_qs.all()
         elif user.role == 'doctor':
-            return Appointment.objects.filter(doctor=user)
+            return base_qs.filter(doctor=user)
         elif user.role == 'patient':
-            return Appointment.objects.filter(patient=user)
+            return base_qs.filter(patient=user)
         return Appointment.objects.none()
     
     def perform_create(self, serializer):
-        if self.request.user.role == 'patient':
-            serializer.save(patient=self.request.user)
+        user = self.request.user
+        doctor = serializer.validated_data.get('doctor')
+        appointment_date = serializer.validated_data.get('appointment_date')
+        appointment_time = serializer.validated_data.get('appointment_time')
+
+        # Double booking check
+        if Appointment.objects.filter(
+            doctor=doctor,
+            appointment_date=appointment_date,
+            appointment_time=appointment_time,
+            status__in=['scheduled', 'confirmed']
+        ).exists():
+            raise serializers.ValidationError({"detail": "This doctor is already booked for this date and time slot."})
+
+        if user.role == 'patient':
+            serializer.save(patient=user)
         else:
             serializer.save()
     
@@ -106,11 +123,12 @@ class ScheduleViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
+        base_qs = Schedule.objects.select_related('doctor', 'doctor__doctor_profile')
         if user.role == 'admin':
-            return Schedule.objects.all()
+            return base_qs.all()
         elif user.role == 'doctor':
-            return Schedule.objects.filter(doctor=user)
-        return Schedule.objects.filter(is_active=True)
+            return base_qs.filter(doctor=user)
+        return base_qs.filter(is_active=True)
     
     def get_permissions(self):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:

@@ -1,6 +1,7 @@
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from django.utils import timezone
 from .models import MedicalRecord, Prescription, LabTest, VitalSigns
 from .serializers import (
     MedicalRecordSerializer, PrescriptionSerializer, 
@@ -19,12 +20,16 @@ class MedicalRecordViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
+        base_qs = MedicalRecord.objects.select_related(
+            'patient', 'doctor', 'patient__patient_profile', 'doctor__doctor_profile', 'appointment'
+        ).prefetch_related('prescriptions', 'lab_tests')
+
         if user.role == 'admin':
-            return MedicalRecord.objects.all()
+            return base_qs.all()
         elif user.role == 'doctor':
-            return MedicalRecord.objects.filter(doctor=user)
+            return base_qs.filter(doctor=user)
         elif user.role == 'patient':
-            return MedicalRecord.objects.filter(patient=user)
+            return base_qs.filter(patient=user)
         return MedicalRecord.objects.none()
     
     def get_permissions(self):
@@ -33,7 +38,10 @@ class MedicalRecordViewSet(viewsets.ModelViewSet):
         return [permissions.IsAuthenticated()]
     
     def perform_create(self, serializer):
-        serializer.save(doctor=self.request.user)
+        if self.request.user.role == 'doctor':
+            serializer.save(doctor=self.request.user)
+        else:
+            serializer.save()
     
     @action(detail=False, methods=['get'])
     def my_records(self, request):
@@ -43,7 +51,7 @@ class MedicalRecordViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        records = MedicalRecord.objects.filter(patient=request.user)
+        records = self.get_queryset().filter(patient=request.user)
         serializer = self.get_serializer(records, many=True)
         return Response(serializer.data)
 
@@ -56,12 +64,13 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
+        base_qs = Prescription.objects.select_related('medical_record', 'medical_record__patient', 'medical_record__doctor')
         if user.role == 'admin':
-            return Prescription.objects.all()
+            return base_qs.all()
         elif user.role == 'doctor':
-            return Prescription.objects.filter(medical_record__doctor=user)
+            return base_qs.filter(medical_record__doctor=user)
         elif user.role == 'patient':
-            return Prescription.objects.filter(medical_record__patient=user)
+            return base_qs.filter(medical_record__patient=user)
         return Prescription.objects.none()
     
     def get_permissions(self):
@@ -78,12 +87,13 @@ class LabTestViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
+        base_qs = LabTest.objects.select_related('medical_record', 'medical_record__patient', 'medical_record__doctor')
         if user.role == 'admin':
-            return LabTest.objects.all()
+            return base_qs.all()
         elif user.role == 'doctor':
-            return LabTest.objects.filter(medical_record__doctor=user)
+            return base_qs.filter(medical_record__doctor=user)
         elif user.role == 'patient':
-            return LabTest.objects.filter(medical_record__patient=user)
+            return base_qs.filter(medical_record__patient=user)
         return LabTest.objects.none()
     
     def get_permissions(self):
@@ -100,7 +110,6 @@ class LabTestViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        from django.utils import timezone
         lab_test.status = 'completed'
         lab_test.completed_date = timezone.now()
         lab_test.save()
@@ -116,12 +125,11 @@ class VitalSignsViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        if user.role == 'admin':
-            return VitalSigns.objects.all()
-        elif user.role == 'doctor':
-            return VitalSigns.objects.all()
+        base_qs = VitalSigns.objects.select_related('patient', 'recorded_by')
+        if user.role == 'admin' or user.role == 'doctor':
+            return base_qs.all()
         elif user.role == 'patient':
-            return VitalSigns.objects.filter(patient=user)
+            return base_qs.filter(patient=user)
         return VitalSigns.objects.none()
     
     def get_permissions(self):

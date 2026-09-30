@@ -1,4 +1,5 @@
 from django.db import models
+from decimal import Decimal
 from users.models import User
 from appointments.models import Appointment
 
@@ -6,6 +7,7 @@ from appointments.models import Appointment
 class Invoice(models.Model):
     STATUS_CHOICES = (
         ('pending', 'Pending'),
+        ('partially_paid', 'Partially Paid'),
         ('paid', 'Paid'),
         ('cancelled', 'Cancelled'),
         ('overdue', 'Overdue'),
@@ -31,6 +33,25 @@ class Invoice(models.Model):
     def __str__(self):
         return f"Invoice {self.invoice_number} - {self.patient.get_full_name()}"
     
+    @property
+    def total_paid(self):
+        paid = self.payments.aggregate(total=models.Sum('amount'))['total']
+        return paid if paid is not None else Decimal('0.00')
+
+    @property
+    def remaining_balance(self):
+        return max(Decimal('0.00'), self.total - self.total_paid)
+
+    def sync_payment_status(self):
+        total_paid = self.total_paid
+        if total_paid >= self.total and self.total > 0:
+            self.status = 'paid'
+        elif total_paid > 0:
+            self.status = 'partially_paid'
+        elif self.status not in ['cancelled', 'overdue']:
+            self.status = 'pending'
+        self.save(update_fields=['status'])
+
     def save(self, *args, **kwargs):
         # Auto-generate invoice number if not provided
         if not self.invoice_number:

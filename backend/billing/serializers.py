@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from decimal import Decimal
 from .models import Invoice, InvoiceItem, Payment, InsuranceClaim
 from users.serializers import UserSerializer
 
@@ -24,22 +25,29 @@ class InvoiceSerializer(serializers.ModelSerializer):
     payments = PaymentSerializer(many=True, read_only=True)
     amount_paid = serializers.SerializerMethodField()
     amount_due = serializers.SerializerMethodField()
+    remaining_balance = serializers.SerializerMethodField()
     
     class Meta:
         model = Invoice
         fields = ['id', 'patient', 'patient_details', 'appointment', 'invoice_number',
                   'invoice_date', 'due_date', 'status', 'subtotal', 'tax', 'discount',
-                  'total', 'amount_paid', 'amount_due', 'items', 'payments', 'notes',
+                  'total', 'amount_paid', 'amount_due', 'remaining_balance', 'items', 'payments', 'notes',
                   'created_at', 'updated_at']
         read_only_fields = ['id', 'invoice_number', 'invoice_date', 'total', 
-                           'created_at', 'updated_at', 'amount_paid', 'amount_due']
+                           'created_at', 'updated_at', 'amount_paid', 'amount_due', 'remaining_balance']
     
     def get_amount_paid(self, obj):
-        return sum(payment.amount for payment in obj.payments.all())
+        # Uses prefetched payments to avoid N+1 queries
+        if hasattr(obj, 'payments'):
+            return sum((payment.amount for payment in obj.payments.all()), Decimal('0.00'))
+        return obj.total_paid
     
     def get_amount_due(self, obj):
         amount_paid = self.get_amount_paid(obj)
-        return obj.total - amount_paid
+        return max(Decimal('0.00'), obj.total - amount_paid)
+
+    def get_remaining_balance(self, obj):
+        return self.get_amount_due(obj)
 
 
 class InsuranceClaimSerializer(serializers.ModelSerializer):
