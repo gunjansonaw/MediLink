@@ -1,15 +1,33 @@
 import React, { useState, useEffect } from 'react';
-import { DollarSign, Download } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
+import {
+  List, Card, Descriptions, Table, Tag, Typography, Space, Spin,
+  Empty, Row, Col, Button, Modal, message, InputNumber, Radio,
+} from 'antd';
+import { DollarOutlined, PrinterOutlined } from '@ant-design/icons';
 import api from '../../services/api';
-import './Billing.css';
+
+const { Title, Text } = Typography;
+
+const statusColor = (status) => {
+  switch (status) {
+    case 'paid': return 'green';
+    case 'partially_paid': return 'blue';
+    case 'pending': return 'orange';
+    case 'overdue': return 'red';
+    default: return 'default';
+  }
+};
 
 function Billing() {
-  const { user } = useAuth();
   const [invoices, setInvoices] = useState([]);
   const [selectedInvoice, setSelectedInvoice] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [forceShowPay, setForceShowPay] = useState(false);
+  const [paying, setPaying] = useState(false);
+  
+  // Payment Modal State
+  const [isPaymentModalVisible, setIsPaymentModalVisible] = useState(false);
+  const [paymentType, setPaymentType] = useState('full');
+  const [customAmount, setCustomAmount] = useState(0);
 
   useEffect(() => {
     fetchInvoices();
@@ -17,242 +35,337 @@ function Billing() {
 
   const fetchInvoices = async () => {
     try {
-      console.log('Fetching invoices from API...');
       const response = await api.get('/billing/invoices/');
-      console.log('Invoices response:', response.data);
-      const invoiceData = response.data.results || response.data;
-      console.log('Setting invoices:', invoiceData);
-      setInvoices(invoiceData);
+      const data = response.data.results || response.data;
+      setInvoices(data);
+      if (data.length > 0 && !selectedInvoice) {
+        setSelectedInvoice(data[0]);
+      }
     } catch (error) {
-      console.error('Error fetching invoices:', error);
-      console.error('Error response:', error.response?.data);
-      alert('Failed to load invoices. Check console for details.');
+      message.error('Failed to load invoices');
     } finally {
       setLoading(false);
     }
   };
 
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'paid':
-        return 'success';
-      case 'pending':
-        return 'warning';
-      case 'overdue':
-        return 'danger';
-      default:
-        return 'info';
+  const openPaymentModal = (invoice) => {
+    const due = parseFloat(invoice.remaining_balance ?? invoice.amount_due ?? invoice.total);
+    setPaymentType('full');
+    setCustomAmount(due);
+    setIsPaymentModalVisible(true);
+  };
+
+  const executePayment = async () => {
+    if (!selectedInvoice) return;
+    const due = parseFloat(selectedInvoice.remaining_balance ?? selectedInvoice.amount_due ?? selectedInvoice.total);
+    const amountToPay = paymentType === 'full' ? due : parseFloat(customAmount);
+
+    if (isNaN(amountToPay) || amountToPay <= 0) {
+      message.error('Please enter a valid payment amount greater than $0');
+      return;
+    }
+
+    if (amountToPay > due) {
+      message.error(`Payment amount cannot exceed the balance due of $${due.toFixed(2)}`);
+      return;
+    }
+
+    setPaying(true);
+    try {
+      await api.post('/billing/payments/', {
+        invoice: selectedInvoice.id,
+        amount: amountToPay,
+        payment_method: 'online',
+        transaction_id: `TXN-${Date.now()}`,
+      });
+      message.success(`Payment of $${amountToPay.toFixed(2)} processed successfully`);
+      setIsPaymentModalVisible(false);
+      
+      // Refresh list & current item
+      await fetchInvoices();
+      const resp = await api.get(`/billing/invoices/${selectedInvoice.id}/`);
+      setSelectedInvoice(resp.data);
+    } catch (error) {
+      const err = error.response?.data?.detail || 'Payment failed. Please try again.';
+      message.error(err);
+    } finally {
+      setPaying(false);
     }
   };
 
-  const handlePay = async (invoice) => {
-    try {
-      const amountDue = parseFloat(invoice.amount_due ?? invoice.total);
-      if (!window.confirm(`Pay $${amountDue.toFixed(2)} for invoice ${invoice.invoice_number}?`)) return;
-
-      const payload = {
-        invoice: invoice.id,
-        amount: amountDue,
-        payment_method: 'online',
-        transaction_id: `WEB-${Date.now()}`,
-      };
-
-      await api.post('/billing/payments/', payload);
-      // Refresh invoices and selected invoice
-      const resp = await api.get(`/billing/invoices/${invoice.id}/`);
-      // update invoice list
-      fetchInvoices();
-      setSelectedInvoice(resp.data);
-      alert('Payment recorded successfully');
-    } catch (error) {
-      console.error('Payment error:', error);
-      alert('Payment failed. See console for details.');
-    }
+  const handleDownloadPdf = (invoiceId) => {
+    const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000/api';
+    window.open(`${apiUrl}/billing/invoices/${invoiceId}/download_pdf/`, '_blank');
   };
 
   if (loading) {
-    return <div className="loading">Loading billing information...</div>;
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 80 }}>
+        <Spin size="large" tip="Loading billing information..." />
+      </div>
+    );
   }
 
+  const itemColumns = [
+    { title: 'Description', dataIndex: 'description', key: 'description' },
+    { title: 'Quantity', dataIndex: 'quantity', key: 'quantity' },
+    {
+      title: 'Unit Price',
+      dataIndex: 'unit_price',
+      key: 'unit_price',
+      render: (v) => `$${parseFloat(v).toFixed(2)}`,
+    },
+    {
+      title: 'Total',
+      dataIndex: 'total',
+      key: 'total',
+      render: (v) => `$${parseFloat(v).toFixed(2)}`,
+    },
+  ];
+
+  const paymentColumns = [
+    {
+      title: 'Date',
+      dataIndex: 'payment_date',
+      key: 'payment_date',
+      render: (d) => new Date(d).toLocaleDateString(),
+    },
+    {
+      title: 'Method',
+      dataIndex: 'payment_method',
+      key: 'payment_method',
+      render: (m) => <Tag>{m.replace('_', ' ').toUpperCase()}</Tag>,
+    },
+    {
+      title: 'Transaction ID',
+      dataIndex: 'transaction_id',
+      key: 'transaction_id',
+    },
+    {
+      title: 'Amount',
+      dataIndex: 'amount',
+      key: 'amount',
+      render: (v) => `$${parseFloat(v).toFixed(2)}`,
+    },
+  ];
+
+  const amountDue = selectedInvoice ? parseFloat(selectedInvoice.remaining_balance ?? selectedInvoice.amount_due ?? selectedInvoice.total) : 0;
+
   return (
-    <div className="billing-page">
-      <div className="page-header">
-        <h1>Billing & Invoices</h1>
-        <div className="debug-controls">
-          <label style={{fontSize:12, marginLeft:10}}>
-            <input type="checkbox" checked={forceShowPay} onChange={(e) => setForceShowPay(e.target.checked)} />
-            {' '}Force show Pay (debug)
-          </label>
-        </div>
-      </div>
+    <div>
+      <Title level={3} style={{ marginBottom: 24 }}>
+        <Space><DollarOutlined />Billing & Invoices</Space>
+      </Title>
 
-      <div style={{ backgroundColor: '#f0f0f0', padding: '10px', margin: '10px', fontSize: '12px', border: '1px solid #ccc' }}>
-        <strong>DEBUG INFO:</strong>
-        <div>User: {user ? `${user.first_name} ${user.last_name} (role: ${user.role})` : 'NOT LOGGED IN'}</div>
-        {selectedInvoice && (
-          <div>
-            Selected Invoice: #{selectedInvoice.invoice_number} | Status: <strong>{selectedInvoice.status}</strong> | Amount Due: ${selectedInvoice.amount_due ?? selectedInvoice.total}
-          </div>
-        )}
-        <div>Pay Button Should Show: {selectedInvoice && selectedInvoice.status !== 'paid' ? '✓ YES' : '✗ NO'}</div>
-      </div>
-
-      <div className="billing-container">
-        <div className="invoices-list">
+      <Row gutter={[16, 16]}>
+        {/* Invoices List */}
+        <Col xs={24} lg={selectedInvoice ? 8 : 24}>
           {invoices.length === 0 ? (
-            <div className="card">
-              <p className="no-data">No invoices found</p>
-            </div>
+            <Card bordered={false} style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
+              <Empty description="No invoices found" />
+            </Card>
           ) : (
-            invoices.map((invoice) => (
-              <div
-                key={invoice.id}
-                className={`invoice-card ${selectedInvoice?.id === invoice.id ? 'active' : ''}`}
-                onClick={() => setSelectedInvoice(invoice)}
-              >
-                <div className="invoice-header">
-                  <div>
-                    <h3>Invoice #{invoice.invoice_number}</h3>
-                    <p className="invoice-date">{invoice.invoice_date}</p>
+            <List
+              dataSource={invoices}
+              renderItem={(invoice) => (
+                <Card
+                  key={invoice.id}
+                  bordered={false}
+                  className={`stat-card-hover ${selectedInvoice?.id === invoice.id ? 'record-card-active' : ''}`}
+                  style={{
+                    marginBottom: 12,
+                    cursor: 'pointer',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+                    border: selectedInvoice?.id === invoice.id ? '1px solid #1677ff' : '1px solid transparent',
+                    transition: 'all 0.2s',
+                  }}
+                  onClick={() => setSelectedInvoice(invoice)}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <Text strong>Invoice #{invoice.invoice_number}</Text>
+                      <br />
+                      <Text type="secondary" style={{ fontSize: 12 }}>{invoice.invoice_date}</Text>
+                    </div>
+                    <Space direction="vertical" align="end" size={4}>
+                      <Tag color={statusColor(invoice.status)}>
+                        {invoice.status.replace('_', ' ').toUpperCase()}
+                      </Tag>
+                      <Text strong>${parseFloat(invoice.total).toFixed(2)}</Text>
+                    </Space>
                   </div>
-                  <span className={`badge badge-${getStatusColor(invoice.status)}`}>
-                    {invoice.status}
-                  </span>
-                </div>
-                <div className="invoice-amount">
-                  <span>Total:</span>
-                  <strong>${parseFloat(invoice.total).toFixed(2)}</strong>
-                </div>
-              </div>
-            ))
+                </Card>
+              )}
+            />
           )}
-        </div>
+        </Col>
 
+        {/* Invoice Details */}
         {selectedInvoice && (
-          <div className="invoice-details card">
-            <div className="invoice-details-header">
-              <h2>Invoice #{selectedInvoice.invoice_number}</h2>
-              <div className="invoice-actions">
-                {(forceShowPay || selectedInvoice.status !== 'paid') && (
-                  <button className="btn btn-success" onClick={() => handlePay(selectedInvoice)}>
-                    Pay Now
-                  </button>
-                )}
-                <button className="btn btn-primary">
-                  <Download size={16} />
-                  Download PDF
-                </button>
-              </div>
-            </div>
-
-            <div className="invoice-info-grid">
-              <div>
-                <p className="label">Invoice Date</p>
-                <p className="value">{selectedInvoice.invoice_date}</p>
-              </div>
-              <div>
-                <p className="label">Due Date</p>
-                <p className="value">{selectedInvoice.due_date}</p>
-              </div>
-              <div>
-                <p className="label">Status</p>
-                <span className={`badge badge-${getStatusColor(selectedInvoice.status)}`}>
-                  {selectedInvoice.status}
-                </span>
-              </div>
-              <div>
-                <p className="label">Patient</p>
-                <p className="value">
+          <Col xs={24} lg={16}>
+            <Card
+              bordered={false}
+              title={`Invoice #${selectedInvoice.invoice_number}`}
+              extra={
+                <Space>
+                  {selectedInvoice.status !== 'paid' && (
+                    <Button
+                      type="primary"
+                      loading={paying}
+                      onClick={() => openPaymentModal(selectedInvoice)}
+                    >
+                      Pay Now
+                    </Button>
+                  )}
+                  <Button 
+                    icon={<PrinterOutlined />}
+                    onClick={() => handleDownloadPdf(selectedInvoice.id)}
+                  >
+                    Print / PDF
+                  </Button>
+                </Space>
+              }
+              style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}
+            >
+              <Descriptions bordered column={2} size="small" style={{ marginBottom: 20 }}>
+                <Descriptions.Item label="Invoice Date">{selectedInvoice.invoice_date}</Descriptions.Item>
+                <Descriptions.Item label="Due Date">{selectedInvoice.due_date}</Descriptions.Item>
+                <Descriptions.Item label="Status">
+                  <Tag color={statusColor(selectedInvoice.status)}>
+                    {selectedInvoice.status.replace('_', ' ').toUpperCase()}
+                  </Tag>
+                </Descriptions.Item>
+                <Descriptions.Item label="Patient">
                   {selectedInvoice.patient_details?.first_name} {selectedInvoice.patient_details?.last_name}
-                </p>
-              </div>
-            </div>
+                </Descriptions.Item>
+              </Descriptions>
 
-            {selectedInvoice.items && selectedInvoice.items.length > 0 && (
-              <div className="invoice-items">
-                <h3>Items</h3>
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Description</th>
-                      <th>Quantity</th>
-                      <th>Unit Price</th>
-                      <th>Total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedInvoice.items.map((item) => (
-                      <tr key={item.id}>
-                        <td>{item.description}</td>
-                        <td>{item.quantity}</td>
-                        <td>${parseFloat(item.unit_price).toFixed(2)}</td>
-                        <td>${parseFloat(item.total).toFixed(2)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            <div className="invoice-summary">
-              <div className="summary-row">
-                <span>Subtotal:</span>
-                <span>${parseFloat(selectedInvoice.subtotal).toFixed(2)}</span>
-              </div>
-              <div className="summary-row">
-                <span>Tax:</span>
-                <span>${parseFloat(selectedInvoice.tax).toFixed(2)}</span>
-              </div>
-              <div className="summary-row">
-                <span>Discount:</span>
-                <span>-${parseFloat(selectedInvoice.discount).toFixed(2)}</span>
-              </div>
-              <div className="summary-row total">
-                <span>Total:</span>
-                <span>${parseFloat(selectedInvoice.total).toFixed(2)}</span>
-              </div>
-              {selectedInvoice.amount_paid > 0 && (
+              {selectedInvoice.items?.length > 0 && (
                 <>
-                  <div className="summary-row">
-                    <span>Amount Paid:</span>
-                    <span>${parseFloat(selectedInvoice.amount_paid).toFixed(2)}</span>
-                  </div>
-                  <div className="summary-row total">
-                    <span>Amount Due:</span>
-                    <span>${parseFloat(selectedInvoice.amount_due).toFixed(2)}</span>
-                  </div>
+                  <Title level={5}>Items</Title>
+                  <Table
+                    dataSource={selectedInvoice.items}
+                    columns={itemColumns}
+                    rowKey="id"
+                    size="small"
+                    pagination={false}
+                    style={{ marginBottom: 20 }}
+                  />
                 </>
               )}
-            </div>
 
-            {selectedInvoice.payments && selectedInvoice.payments.length > 0 && (
-              <div className="payment-history">
-                <h3>Payment History</h3>
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Date</th>
-                      <th>Amount</th>
-                      <th>Method</th>
-                      <th>Transaction ID</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedInvoice.payments.map((payment) => (
-                      <tr key={payment.id}>
-                        <td>{new Date(payment.payment_date).toLocaleDateString()}</td>
-                        <td>${parseFloat(payment.amount).toFixed(2)}</td>
-                        <td>{payment.payment_method}</td>
-                        <td>{payment.transaction_id || 'N/A'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+              {/* Summary */}
+              <Card
+                size="small"
+                style={{ background: '#fafafa', marginBottom: selectedInvoice.payments?.length > 0 ? 20 : 0 }}
+              >
+                {[
+                  ['Subtotal', selectedInvoice.subtotal],
+                  ['Tax', selectedInvoice.tax],
+                  ['Discount', selectedInvoice.discount],
+                ].map(([label, val]) => (
+                  <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
+                    <Text type="secondary">{label}:</Text>
+                    <Text>${parseFloat(val || 0).toFixed(2)}</Text>
+                  </div>
+                ))}
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  padding: '8px 0 4px',
+                  borderTop: '1px solid #f0f0f0',
+                  marginTop: 4,
+                }}>
+                  <Text strong>Total:</Text>
+                  <Text strong>${parseFloat(selectedInvoice.total || 0).toFixed(2)}</Text>
+                </div>
+                {parseFloat(selectedInvoice.amount_paid || 0) > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
+                    <Text type="secondary">Amount Paid:</Text>
+                    <Text style={{ color: '#52c41a', fontWeight: 600 }}>
+                      ${parseFloat(selectedInvoice.amount_paid).toFixed(2)}
+                    </Text>
+                  </div>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
+                  <Text strong>Balance Due:</Text>
+                  <Text strong style={{ color: amountDue > 0 ? '#ff4d4f' : '#52c41a', fontSize: 16 }}>
+                    ${amountDue.toFixed(2)}
+                  </Text>
+                </div>
+              </Card>
+
+              {selectedInvoice.payments?.length > 0 && (
+                <>
+                  <Title level={5} style={{ marginTop: 20 }}>Payment History</Title>
+                  <Table
+                    dataSource={selectedInvoice.payments}
+                    columns={paymentColumns}
+                    rowKey="id"
+                    size="small"
+                    pagination={false}
+                  />
+                </>
+              )}
+            </Card>
+          </Col>
+        )}
+      </Row>
+
+      {/* Partial / Full Payment Modal */}
+      <Modal
+        title={`Process Payment - Invoice #${selectedInvoice?.invoice_number}`}
+        open={isPaymentModalVisible}
+        onOk={executePayment}
+        confirmLoading={paying}
+        onCancel={() => setIsPaymentModalVisible(false)}
+        okText="Confirm & Pay"
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Text type="secondary">Total Outstanding Balance:</Text>
+          <div style={{ fontSize: 24, fontWeight: 'bold', color: '#1677ff' }}>
+            ${amountDue.toFixed(2)}
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 16 }}>
+          <Text strong>Select Payment Amount:</Text>
+          <div style={{ marginTop: 8 }}>
+            <Radio.Group 
+              value={paymentType} 
+              onChange={(e) => {
+                setPaymentType(e.target.value);
+                if (e.target.value === 'full') {
+                  setCustomAmount(amountDue);
+                }
+              }}
+            >
+              <Radio value="full">Pay Full Balance (${amountDue.toFixed(2)})</Radio>
+              <Radio value="partial">Pay Partial Amount</Radio>
+            </Radio.Group>
+          </div>
+        </div>
+
+        {paymentType === 'partial' && (
+          <div style={{ marginBottom: 16 }}>
+            <Text>Enter Partial Amount ($):</Text>
+            <div style={{ marginTop: 6 }}>
+              <InputNumber
+                style={{ width: '100%' }}
+                min={1}
+                max={amountDue}
+                step={10}
+                value={customAmount}
+                onChange={(val) => setCustomAmount(val)}
+                prefix={<DollarOutlined />}
+              />
+            </div>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              Remaining balance after payment: ${(Math.max(0, amountDue - (customAmount || 0))).toFixed(2)}
+            </Text>
           </div>
         )}
-      </div>
+      </Modal>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { Spin } from 'antd';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './components/auth/Login';
 import Register from './components/auth/Register';
@@ -12,35 +13,51 @@ import MedicalRecords from './components/medical-records/MedicalRecords';
 import Billing from './components/billing/Billing';
 
 function PrivateRoute({ children, allowedRoles }) {
-  const { user } = useAuth();
-  
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
+        <Spin size="large" tip="Loading..." />
+      </div>
+    );
+  }
+
   if (!user) {
-    return <Navigate to="/login" />;
+    return <Navigate to="/login" replace />;
   }
-  
+
   if (allowedRoles && !allowedRoles.includes(user.role)) {
-    return <Navigate to="/" />;
+    return <Navigate to="/" replace />;
   }
-  
+
   return children;
 }
 
 function DashboardRedirect() {
-  const { user } = useAuth();
-  
-  if (!user) {
-    return <Navigate to="/login" />;
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
+        <Spin size="large" />
+      </div>
+    );
   }
-  
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
   switch (user.role) {
     case 'admin':
-      return <Navigate to="/admin/dashboard" />;
+      return <Navigate to="/admin/dashboard" replace />;
     case 'doctor':
-      return <Navigate to="/doctor/dashboard" />;
+      return <Navigate to="/doctor/dashboard" replace />;
     case 'patient':
-      return <Navigate to="/patient/dashboard" />;
+      return <Navigate to="/patient/dashboard" replace />;
     default:
-      return <Navigate to="/login" />;
+      return <Navigate to="/login" replace />;
   }
 }
 
@@ -51,9 +68,9 @@ function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
-          
+
           <Route path="/" element={<DashboardRedirect />} />
-          
+
           {/* Admin Routes */}
           <Route path="/admin/*" element={
             <PrivateRoute allowedRoles={['admin']}>
@@ -67,7 +84,7 @@ function App() {
               </Layout>
             </PrivateRoute>
           } />
-          
+
           {/* Doctor Routes */}
           <Route path="/doctor/*" element={
             <PrivateRoute allowedRoles={['doctor']}>
@@ -80,7 +97,7 @@ function App() {
               </Layout>
             </PrivateRoute>
           } />
-          
+
           {/* Patient Routes */}
           <Route path="/patient/*" element={
             <PrivateRoute allowedRoles={['patient']}>

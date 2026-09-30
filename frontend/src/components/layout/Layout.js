@@ -1,85 +1,158 @@
-import React from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import React, { useState } from 'react';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
+import {
+  Layout as AntLayout, Menu, Avatar, Dropdown, Typography, Space, Button,
+} from 'antd';
+import {
+  DashboardOutlined, CalendarOutlined, FileTextOutlined,
+  DollarOutlined, LogoutOutlined, UserOutlined, MenuFoldOutlined,
+  MenuUnfoldOutlined, HeartFilled,
+} from '@ant-design/icons';
 import { useAuth } from '../../context/AuthContext';
-import { 
-  Heart, Calendar, FileText, DollarSign, 
-  LogOut, Menu, X 
-} from 'lucide-react';
-import './Layout.css';
+
+const { Sider, Header, Content } = AntLayout;
+const { Text } = Typography;
 
 function Layout({ children }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const [sidebarOpen, setSidebarOpen] = React.useState(true);
+  const location = useLocation();
+  const [collapsed, setCollapsed] = useState(false);
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     navigate('/login');
   };
 
-  const getNavItems = () => {
-    const baseUrl = `/${user.role}`;
-    
-    const items = [
-      { path: `${baseUrl}/dashboard`, icon: <Heart size={20} />, label: 'Dashboard' },
-      { path: `${baseUrl}/appointments`, icon: <Calendar size={20} />, label: 'Appointments' },
-      { path: `${baseUrl}/medical-records`, icon: <FileText size={20} />, label: 'Medical Records' },
-    ];
+  const baseUrl = `/${user.role}`;
 
-    if (user.role === 'admin' || user.role === 'patient') {
-      items.push({ path: `${baseUrl}/billing`, icon: <DollarSign size={20} />, label: 'Billing' });
-    }
+  const navItems = [
+    {
+      key: `${baseUrl}/dashboard`,
+      icon: <DashboardOutlined />,
+      label: <Link to={`${baseUrl}/dashboard`}>Dashboard</Link>,
+    },
+    {
+      key: `${baseUrl}/appointments`,
+      icon: <CalendarOutlined />,
+      label: <Link to={`${baseUrl}/appointments`}>Appointments</Link>,
+    },
+    {
+      key: `${baseUrl}/medical-records`,
+      icon: <FileTextOutlined />,
+      label: <Link to={`${baseUrl}/medical-records`}>Medical Records</Link>,
+    },
+  ];
 
-    return items;
-  };
+  if (user.role === 'admin' || user.role === 'patient') {
+    navItems.push({
+      key: `${baseUrl}/billing`,
+      icon: <DollarOutlined />,
+      label: <Link to={`${baseUrl}/billing`}>Billing</Link>,
+    });
+  }
+
+  const userMenuItems = [
+    {
+      key: 'logout',
+      icon: <LogoutOutlined />,
+      label: 'Logout',
+      danger: true,
+      onClick: handleLogout,
+    },
+  ];
+
+  const selectedKey = navItems.find((item) => location.pathname.startsWith(item.key))?.key || '';
 
   return (
-    <div className="layout">
-      <aside className={`sidebar ${sidebarOpen ? 'open' : 'closed'}`}>
-        <div className="sidebar-header">
-          <Heart size={32} />
-          <h2>MediLink</h2>
+    <AntLayout style={{ minHeight: '100vh' }}>
+      <Sider
+        collapsible
+        collapsed={collapsed}
+        onCollapse={setCollapsed}
+        trigger={null}
+        width={220}
+        style={{
+          position: 'fixed',
+          height: '100vh',
+          left: 0,
+          top: 0,
+          bottom: 0,
+          zIndex: 100,
+        }}
+      >
+        {/* Logo */}
+        <div style={{
+          height: 64,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: collapsed ? 'center' : 'flex-start',
+          padding: collapsed ? '0 20px' : '0 20px',
+          borderBottom: '1px solid rgba(255,255,255,0.08)',
+        }}>
+          <HeartFilled style={{ fontSize: 22, color: '#1677ff' }} />
+          {!collapsed && (
+            <Text strong style={{ color: '#fff', fontSize: 18, marginLeft: 10 }}>
+              MediLink
+            </Text>
+          )}
         </div>
 
-        <nav className="sidebar-nav">
-          {getNavItems().map((item) => (
-            <Link key={item.path} to={item.path} className="nav-item">
-              {item.icon}
-              <span>{item.label}</span>
-            </Link>
-          ))}
-        </nav>
+        <Menu
+          theme="dark"
+          mode="inline"
+          selectedKeys={[selectedKey]}
+          items={navItems}
+          style={{ marginTop: 8, borderRight: 0 }}
+        />
+      </Sider>
 
-        <div className="sidebar-footer">
-          <button onClick={handleLogout} className="logout-btn">
-            <LogOut size={20} />
-            <span>Logout</span>
-          </button>
-        </div>
-      </aside>
+      <AntLayout style={{ marginLeft: collapsed ? 80 : 220, transition: 'all 0.2s' }}>
+        <Header style={{
+          position: 'sticky',
+          top: 0,
+          zIndex: 99,
+          background: '#fff',
+          padding: '0 24px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          boxShadow: '0 1px 4px rgba(0,21,41,0.08)',
+          height: 64,
+        }}>
+          <Button
+            type="text"
+            icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+            onClick={() => setCollapsed(!collapsed)}
+            style={{ fontSize: 16, width: 40, height: 40 }}
+          />
 
-      <div className="main-content">
-        <header className="header">
-          <button 
-            className="menu-toggle" 
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-          >
-            {sidebarOpen ? <X size={24} /> : <Menu size={24} />}
-          </button>
+          <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
+            <Space style={{ cursor: 'pointer' }}>
+              <Avatar
+                style={{ backgroundColor: '#1677ff' }}
+                icon={<UserOutlined />}
+              />
+              <Space direction="vertical" size={0}>
+                <Text strong style={{ lineHeight: '1.2', fontSize: 14 }}>
+                  {user.first_name} {user.last_name}
+                </Text>
+                <Text
+                  type="secondary"
+                  style={{ lineHeight: '1.2', fontSize: 12, textTransform: 'capitalize' }}
+                >
+                  {user.role}
+                </Text>
+              </Space>
+            </Space>
+          </Dropdown>
+        </Header>
 
-          <div className="header-user">
-            <div className="user-info">
-              <span className="user-name">{user.first_name} {user.last_name}</span>
-              <span className="user-role">{user.role}</span>
-            </div>
-          </div>
-        </header>
-
-        <main className="content">
+        <Content className="page-content">
           {children}
-        </main>
-      </div>
-    </div>
+        </Content>
+      </AntLayout>
+    </AntLayout>
   );
 }
 
