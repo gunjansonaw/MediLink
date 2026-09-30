@@ -36,3 +36,6 @@ __pycache__/
 
 # Media files (optional - uncomment if you don't want to commit uploads)
 # media/
+
+# Agent configuration
+.agents/

@@ -1,0 +1,14 @@
+.git
+.gitignore
+.env
+.agents
+*.md
+!README.md
+__pycache__
+*.pyc
+*.pyo
+venv
+.venv
+node_modules
+build
+staticfiles
