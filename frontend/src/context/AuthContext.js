@@ -1,4 +1,4 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
+import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
 import api from '../services/api';
 
 const AuthContext = createContext();
@@ -12,78 +12,76 @@ export const useAuth = () => {
 };
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
+  const [user, setUser]       = useState(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    // Check if user is logged in on mount
-    const token = localStorage.getItem('access_token');
-    const savedUser = localStorage.getItem('user');
-    
-    const loadUser = async () => {
-      if (token && savedUser) {
-        setUser(JSON.parse(savedUser));
-        setLoading(false);
-        return;
-      }
-
-      if (token && !savedUser) {
-        try {
-          // Try to fetch current user from API when token exists
-          const resp = await api.get('/users/me/');
-          localStorage.setItem('user', JSON.stringify(resp.data));
-          setUser(resp.data);
-        } catch (err) {
-          // Token invalid or expired — clear local storage
-          localStorage.removeItem('access_token');
-          localStorage.removeItem('refresh_token');
-          localStorage.removeItem('user');
-          setUser(null);
-        }
-      }
-
+  /**
+   * Attempt to restore the session by calling /users/me/.
+   * If the HttpOnly access cookie is still valid the backend returns the
+   * current user; if not, the response interceptor in api.js tries a silent
+   * refresh before giving up.
+   */
+  const restoreSession = useCallback(async () => {
+    try {
+      const resp = await api.get('/users/me/');
+      setUser(resp.data);
+    } catch {
+      // No valid session — user stays null
+      setUser(null);
+    } finally {
       setLoading(false);
-    };
-
-    loadUser();
+    }
   }, []);
 
+  useEffect(() => {
+    restoreSession();
+  }, [restoreSession]);
+
+  /**
+   * POST credentials → backend sets HttpOnly access + refresh cookies.
+   * We receive only the user payload (no tokens exposed to JS).
+   */
   const login = async (username, password) => {
     try {
       const response = await api.post('/users/login/', { username, password });
-      const { access, refresh, user: userData } = response.data;
-      
-      localStorage.setItem('access_token', access);
-      localStorage.setItem('refresh_token', refresh);
-      localStorage.setItem('user', JSON.stringify(userData));
-      
-      setUser(userData);
+      setUser(response.data.user);
       return { success: true };
     } catch (error) {
-      return { 
-        success: false, 
-        error: error.response?.data?.error || 'Login failed' 
+      return {
+        success: false,
+        error: error.response?.data?.error || 'Login failed',
       };
     }
   };
 
+  /**
+   * Register a new account.  Does NOT auto-login; the caller should redirect
+   * to /login so the user explicitly signs in.
+   */
   const register = async (userData) => {
     try {
       await api.post('/users/', userData);
       return { success: true };
     } catch (error) {
-      return { 
-        success: false, 
-        error: error.response?.data || 'Registration failed' 
+      return {
+        success: false,
+        error: error.response?.data || 'Registration failed',
       };
     }
   };
 
-  const logout = () => {
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
-    localStorage.removeItem('user');
-    setUser(null);
+  /**
+   * POST to /users/logout/ — the backend blacklists the refresh token and
+   * clears both HttpOnly cookies via Set-Cookie headers.
+   */
+  const logout = async () => {
+    try {
+      await api.post('/users/logout/');
+    } catch {
+      // Even if the request fails, clear local state so the UI resets
+    } finally {
+      setUser(null);
+    }
   };
 
   const value = {
@@ -92,6 +90,7 @@ export const AuthProvider = ({ children }) => {
     login,
     register,
     logout,
+    refreshUser: restoreSession,  // expose so components can force a re-fetch
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

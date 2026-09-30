@@ -48,32 +48,48 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
                   'role', 'phone', 'date_of_birth', 'address', 'doctor_profile', 'patient_profile']
     
     def validate(self, attrs):
-        if attrs['password'] != attrs['password2']:
-            raise serializers.ValidationError({"password": "Password fields didn't match."})
+        # Prevent privilege escalation via public registration
+        if attrs.get('role') == 'admin':
+            raise serializers.ValidationError({
+                "role": "Admin accounts cannot be registered via the public registration endpoint."
+            })
         
-        # Validate that if profile data is provided, it matches the role
-        if 'doctor_profile' in attrs and attrs['role'] != 'doctor':
-            raise serializers.ValidationError({"doctor_profile": "Doctor profile can only be set for users with doctor role."})
+        # Enforce password confirmation
+        if attrs.get('password') != attrs.get('password2'):
+            raise serializers.ValidationError({"password2": "Password fields did not match."})
         
-        if 'patient_profile' in attrs and attrs['role'] != 'patient':
-            raise serializers.ValidationError({"patient_profile": "Patient profile can only be set for users with patient role."})
+        # Default role to patient if not specified or invalid
+        if attrs.get('role') not in ['patient', 'doctor']:
+            attrs['role'] = 'patient'
+        
+        # Validate role matches profile
+        if 'doctor_profile' in attrs and attrs.get('role') != 'doctor':
+            raise serializers.ValidationError({"doctor_profile": "Doctor profile can only be set for doctor role."})
+        
+        if 'patient_profile' in attrs and attrs.get('role') != 'patient':
+            raise serializers.ValidationError({"patient_profile": "Patient profile can only be set for patient role."})
         
         return attrs
     
     def create(self, validated_data):
-        validated_data.pop('password2')
+        validated_data.pop('password2', None)
         doctor_profile_data = validated_data.pop('doctor_profile', None)
         patient_profile_data = validated_data.pop('patient_profile', None)
         
         user = User.objects.create_user(**validated_data)
         
-        if user.role == 'doctor' and doctor_profile_data:
+        if user.role == 'doctor':
+            if not doctor_profile_data:
+                doctor_profile_data = {
+                    'specialization': 'General Medicine',
+                    'license_number': f'MED-{user.id:06d}',
+                    'experience_years': 1,
+                    'consultation_fee': 50.00
+                }
             DoctorProfile.objects.create(user=user, **doctor_profile_data)
         elif user.role == 'patient':
-            # Always create patient profile, even if data is minimal
             if not patient_profile_data:
                 patient_profile_data = {}
-            # Ensure emergency contact fields have defaults if not provided
             if 'emergency_contact' not in patient_profile_data:
                 patient_profile_data['emergency_contact'] = ''
             if 'emergency_contact_name' not in patient_profile_data:

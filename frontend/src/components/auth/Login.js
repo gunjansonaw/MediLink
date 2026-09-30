@@ -1,23 +1,22 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { Form, Input, Button, Card, Alert, Typography, Space } from 'antd';
+import { UserOutlined, LockOutlined, HeartFilled } from '@ant-design/icons';
 import { useAuth } from '../../context/AuthContext';
-import { Heart } from 'lucide-react';
-import './Auth.css';
+
+const { Title, Text } = Typography;
 
 function Login() {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const { login } = useAuth();
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSubmit = async (values) => {
     setError('');
     setLoading(true);
 
-    const result = await login(username, password);
+    const result = await login(values.username, values.password);
 
     if (result.success) {
       navigate('/');
@@ -29,51 +28,102 @@ function Login() {
   };
 
   return (
-    <div className="auth-container">
-      <div className="auth-card">
-        <div className="auth-header">
-          <Heart size={48} className="auth-icon" />
-          <h1>MediLink</h1>
-          <p>Hospital Management System</p>
-        </div>
+    <div className="auth-bg">
+      <Card
+        style={{
+          width: '100%',
+          maxWidth: 440,
+          borderRadius: 16,
+          boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+        }}
+        bodyStyle={{ padding: '40px 40px 32px' }}
+      >
+        {/* Brand Header */}
+        <Space direction="vertical" align="center" style={{ width: '100%', marginBottom: 32 }}>
+          <div
+            style={{
+              width: 64,
+              height: 64,
+              borderRadius: 16,
+              background: 'linear-gradient(135deg, #1677ff, #0050b3)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <HeartFilled style={{ fontSize: 32, color: '#fff' }} />
+          </div>
+          <Title level={2} style={{ margin: 0, color: '#001529' }}>
+            MediLink
+          </Title>
+          <Text type="secondary">Hospital Management System</Text>
+        </Space>
 
-        <form onSubmit={handleSubmit} className="auth-form">
-          <h2>Sign In</h2>
+        <Title level={4} style={{ marginBottom: 24, color: '#1d2939' }}>
+          Sign In
+        </Title>
 
-          {error && <div className="error">{error}</div>}
+        {error && (
+          <Alert
+            message={error}
+            type="error"
+            showIcon
+            style={{ marginBottom: 20, borderRadius: 8 }}
+          />
+        )}
 
-          <div className="form-group">
-            <label htmlFor="username">Username</label>
-            <input
-              type="text"
-              id="username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              required
+        <Form
+          name="login"
+          onFinish={handleSubmit}
+          layout="vertical"
+          size="large"
+          requiredMark={false}
+        >
+          <Form.Item
+            name="username"
+            label="Username or Email"
+            rules={[{ required: true, message: 'Please enter your username or email' }]}
+          >
+            <Input
+              prefix={<UserOutlined style={{ color: '#bfbfbf' }} />}
+              placeholder="Enter username or email"
               autoFocus
             />
-          </div>
+          </Form.Item>
 
-          <div className="form-group">
-            <label htmlFor="password">Password</label>
-            <input
-              type="password"
-              id="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
+          <Form.Item
+            name="password"
+            label="Password"
+            rules={[{ required: true, message: 'Please enter your password' }]}
+          >
+            <Input.Password
+              prefix={<LockOutlined style={{ color: '#bfbfbf' }} />}
+              placeholder="Enter password"
             />
-          </div>
+          </Form.Item>
 
-          <button type="submit" className="btn btn-primary btn-block" disabled={loading}>
-            {loading ? 'Signing in...' : 'Sign In'}
-          </button>
+          <Form.Item style={{ marginBottom: 16 }}>
+            <Button
+              type="primary"
+              htmlType="submit"
+              loading={loading}
+              block
+              style={{ height: 44, borderRadius: 8, fontWeight: 600 }}
+            >
+              {loading ? 'Signing in...' : 'Sign In'}
+            </Button>
+          </Form.Item>
+        </Form>
 
-          <p className="auth-footer">
-            Don't have an account? <Link to="/register">Register here</Link>
-          </p>
-        </form>
-      </div>
+        <div style={{ textAlign: 'center' }}>
+          <Text type="secondary">
+            Don&apos;t have an account?{' '}
+            <Link to="/register" style={{ fontWeight: 600 }}>
+              Register here
+            </Link>
+          </Text>
+        </div>
+      </Card>
     </div>
   );
 }

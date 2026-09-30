@@ -5,14 +5,12 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
+from django.middleware.csrf import get_token
+from django.http import JsonResponse
 from rest_framework import permissions
 from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
-from rest_framework_simplejwt.views import (
-    TokenObtainPairView,
-    TokenRefreshView,
-    TokenVerifyView,
-)
+
 
 schema_view = get_schema_view(
     openapi.Info(
@@ -27,18 +25,27 @@ schema_view = get_schema_view(
     permission_classes=(permissions.AllowAny,),
 )
 
+
+def csrf_token_view(request):
+    """
+    GET /api/csrf/ — Returns a JSON response whose only purpose is to trigger
+    Django's middleware to set the csrftoken cookie on the client.
+    The frontend calls this once on startup so subsequent POST requests can
+    read the cookie and send it as X-CSRFToken.
+    """
+    return JsonResponse({'detail': 'CSRF cookie set', 'csrfToken': get_token(request)})
+
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/users/', include('users.urls')),
     path('api/appointments/', include('appointments.urls')),
     path('api/medical-records/', include('medical_records.urls')),
     path('api/billing/', include('billing.urls')),
-    
-    # JWT Auth endpoints
-    path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
-    path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
-    path('api/token/verify/', TokenVerifyView.as_view(), name='token_verify'),
-    
+
+    # CSRF cookie endpoint — call once on app init so JS can read the cookie
+    path('api/csrf/', csrf_token_view, name='csrf-token'),
+
     # API Documentation
     path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
