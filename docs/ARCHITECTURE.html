@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>MediLink - System &amp; Data Flow Architecture</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+:root{--blue:#1d4ed8;--blue-l:#3b82f6;--blue-xl:#eff6ff;--green:#15803d;--green-l:#22c55e;--green-xl:#f0fdf4;--amber:#b45309;--amber-l:#f59e0b;--amber-xl:#fffbeb;--red:#b91c1c;--red-l:#ef4444;--red-xl:#fef2f2;--purple:#7e22ce;--purple-l:#a855f7;--purple-xl:#faf5ff;--slate:#1e293b;--slate-m:#475569;--slate-l:#94a3b8;--border:#e2e8f0;--bg:#f8fafc}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--slate);font-size:13px;line-height:1.6}
+.cover{background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 50%,#1d4ed8 100%);color:#fff;padding:80px 60px;display:flex;flex-direction:column;justify-content:center}
+.cover .badge{display:inline-block;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);border-radius:20px;padding:4px 14px;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;margin-bottom:20px}
+.cover h1{font-size:38px;font-weight:800;line-height:1.15}
+.cover h1 span{color:#60a5fa}
+.cover p{margin-top:14px;font-size:14px;color:rgba(255,255,255,.7);max-width:600px}
+.cover .meta{margin-top:36px;display:flex;gap:40px}
+.cover .meta-item label{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:rgba(255,255,255,.5)}
+.cover .meta-item value{display:block;font-size:13px;font-weight:600;color:#fff;margin-top:2px}
+.page{max-width:1100px;margin:0 auto;padding:40px 48px}
+.section{margin-bottom:44px}
+.section-title{font-size:18px;font-weight:700;color:var(--slate);border-left:4px solid var(--blue);padding-left:14px;margin-bottom:18px}
+.section-sub{font-size:13px;font-weight:600;color:var(--slate);margin:20px 0 8px}
+.section p{color:var(--slate-m);margin-bottom:8px;font-size:12.5px}
+hr{border:none;border-top:1px solid var(--border);margin:28px 0}
+.arch-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;margin-top:14px}
+.arch-card{border:1px solid var(--border);border-radius:10px;padding:18px;background:#fff;position:relative;overflow:hidden}
+.arch-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px}
+.arch-card.blue::before{background:var(--blue-l)}.arch-card.green::before{background:var(--green-l)}.arch-card.amber::before{background:var(--amber-l)}.arch-card.purple::before{background:var(--purple-l)}.arch-card.red::before{background:var(--red-l)}
+.arch-card h3{font-size:12.5px;font-weight:700;margin-bottom:8px}
+.arch-card ul{list-style:none;padding:0;margin:0}
+.arch-card ul li{font-size:11px;color:var(--slate-m);padding:3px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+.arch-card ul li:last-child{border-bottom:none}
+.tag{font-size:9.5px;font-weight:600;padding:2px 6px;border-radius:4px;font-family:'JetBrains Mono',monospace}
+.tag-blue{background:var(--blue-xl);color:var(--blue)}.tag-green{background:var(--green-xl);color:var(--green)}.tag-amber{background:var(--amber-xl);color:var(--amber)}.tag-slate{background:#f1f5f9;color:var(--slate-m)}
+.stack{display:flex;flex-direction:column;gap:3px;margin-top:14px}
+.stack-layer{border-radius:8px;padding:12px 16px;display:flex;align-items:center;gap:14px}
+.stack-layer .layer-label{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;width:70px;flex-shrink:0;color:rgba(0,0,0,.45)}
+.stack-layer .layer-items{display:flex;gap:7px;flex-wrap:wrap;flex:1}
+.stack-layer .chip{font-size:11px;font-weight:600;padding:3px 10px;border-radius:6px;white-space:nowrap}
+.l1{background:#dbeafe}.l1 .chip{background:#1d4ed8;color:#fff}
+.l2{background:#dcfce7}.l2 .chip{background:#15803d;color:#fff}
+.l3{background:#fef9c3}.l3 .chip{background:#b45309;color:#fff}
+.l4{background:#f3e8ff}.l4 .chip{background:#7e22ce;color:#fff}
+.l5{background:#ffe4e6}.l5 .chip{background:#be123c;color:#fff}
+.l6{background:#e0f2fe}.l6 .chip{background:#0369a1;color:#fff}
+.flow{display:flex;flex-direction:column;gap:0;margin-top:14px}
+.flow-step{display:flex;align-items:flex-start;gap:14px}
+.flow-step .step-col{display:flex;flex-direction:column;align-items:center}
+.flow-step .step-num{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;color:#fff}
+.flow-step .step-line{width:2px;flex:1;min-height:24px;background:var(--border);margin:3px 0}
+.flow-step:last-child .step-line{display:none}
+.flow-step .step-body{flex:1;padding-bottom:16px}
+.flow-step .step-body h4{font-size:12.5px;font-weight:600;margin-bottom:3px;margin-top:3px}
+.flow-step .step-body p{font-size:11px;color:var(--slate-m);margin:0}
+.flow-step .step-body code{font-family:'JetBrains Mono',monospace;font-size:10px;background:#f1f5f9;padding:1px 4px;border-radius:3px;color:var(--slate)}
+.erd-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin-top:14px}
+.erd-table{border:1.5px solid var(--border);border-radius:8px;overflow:hidden;background:#fff}
+.erd-table .erd-head{padding:8px 12px;font-size:11.5px;font-weight:700}
+.erd-table .erd-body{padding:4px 0}
+.erd-table .erd-row{padding:3px 12px;font-size:10.5px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #f1f5f9;gap:8px}
+.erd-table .erd-row:last-child{border-bottom:none}
+.erd-table .erd-row .field{color:var(--slate);font-weight:500;font-family:'JetBrains Mono',monospace;font-size:10px}
+.erd-table .erd-row .type{font-size:9.5px;color:var(--slate-l);font-family:'JetBrains Mono',monospace}
+.erd-pk{color:var(--amber);font-weight:700!important}.erd-fk{color:var(--blue);font-weight:700!important}
+.api-table{width:100%;border-collapse:collapse;margin-top:10px}
+.api-table th{background:#f1f5f9;text-align:left;padding:7px 10px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--slate-m);border-bottom:1px solid var(--border)}
+.api-table td{padding:7px 10px;font-size:11px;border-bottom:1px solid var(--border);vertical-align:top}
+.api-table tr:last-child td{border-bottom:none}.api-table tr:hover td{background:#f8fafc}
+.method{font-family:'JetBrains Mono',monospace;font-size:9.5px;font-weight:700;padding:2px 6px;border-radius:4px;white-space:nowrap}
+.m-get{background:#dcfce7;color:#15803d}.m-post{background:#dbeafe;color:#1d4ed8}.m-patch{background:#fef3c7;color:#92400e}.m-delete{background:#ffe4e6;color:#be123c}
+.endpoint{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--slate)}
+.auth-badge{font-size:9px;font-weight:600;padding:2px 5px;border-radius:3px;white-space:nowrap}
+.auth-any{background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0}.auth-jwt{background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe}.auth-admin{background:#faf5ff;color:#7e22ce;border:1px solid #e9d5ff}.auth-doctor{background:#fff7ed;color:#c2410c;border:1px solid #fed7aa}
+.rel-table{width:100%;border-collapse:collapse;margin-top:10px}
+.rel-table td{padding:5px 10px;font-size:11px;border-bottom:1px solid var(--border)}
+.rel-table td:nth-child(2){text-align:center;font-size:14px;color:var(--blue-l)}
+.cookie-box{background:linear-gradient(135deg,#0f172a,#1e3a5f);color:#e2e8f0;border-radius:10px;padding:20px 24px;margin-top:14px}
+.cookie-box h3{color:#60a5fa;font-size:13px;margin-bottom:12px}
+.cookie-row{display:flex;align-items:flex-start;gap:8px;margin:8px 0;font-size:11px}
+.cookie-row .actor{background:rgba(255,255,255,.12);border-radius:5px;padding:3px 9px;font-weight:600;font-size:10.5px;white-space:nowrap;min-width:75px;text-align:center;flex-shrink:0;margin-top:1px}
+.cookie-row .msg{color:#94a3b8;font-size:10.5px;font-family:'JetBrains Mono',monospace;word-break:break-all}
+.cookie-note{font-size:10.5px;color:#64748b;margin-top:12px;border-top:1px solid rgba(255,255,255,.1);padding-top:10px}
+.pipeline{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:12px}
+.pipeline .node{border:1.5px solid var(--border);border-radius:8px;padding:9px 14px;font-size:11.5px;font-weight:600;background:#fff;text-align:center;min-width:100px}
+.pipeline .arrow-h{font-size:16px;color:var(--slate-l)}
+.footer{margin-top:40px;padding-top:18px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;font-size:10.5px;color:var(--slate-l)}
+.footer strong{color:var(--slate-m)}
+@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}.section{page-break-inside:avoid}}
+</style>
+</head>
+<body>
+<div class="cover">
+  <span class="badge">Technical Documentation &middot; v2.0</span>
+  <h1>MediLink<br/><span>System &amp; Data Flow Architecture</span></h1>
+  <p>A comprehensive reference covering the full-stack design, Docker service topology, database schema, HttpOnly cookie JWT authentication flow, REST API surface, RBAC model, and Celery async pipeline of the MediLink Hospital Management System.</p>
+  <div class="meta">
+    <div class="meta-item"><label>Project</label><value>MediLink HMS</value></div>
+    <div class="meta-item"><label>Stack</label><value>Django &middot; React &middot; PostgreSQL &middot; Redis</value></div>
+    <div class="meta-item"><label>Auth Model</label><value>HttpOnly Cookie JWT</value></div>
+    <div class="meta-item"><label>Date</label><value>September 2026</value></div>
+  </div>
+</div>
+
+<div class="page">
+
+<div class="section">
+<div class="section-title">1 &middot; Technology Stack</div>
+<p>MediLink is a role-based hospital management system built with a decoupled architecture. A React SPA communicates with a Django REST API via JSON HTTP. All services are containerised with Docker Compose on a private bridge network.</p>
+<div class="stack">
+  <div class="stack-layer l1"><div class="layer-label">Client</div><div class="layer-items"><span class="chip">React 18 (CRA)</span><span class="chip">Ant Design 5</span><span class="chip">Axios + Interceptors</span><span class="chip">React Router 6</span></div></div>
+  <div class="stack-layer l6"><div class="layer-label">Proxy</div><div class="layer-items"><span class="chip">Nginx 1.25 Alpine</span><span class="chip">SPA Routing</span><span class="chip">API Reverse Proxy /api/*</span><span class="chip">Cookie Header Passthrough</span></div></div>
+  <div class="stack-layer l2"><div class="layer-label">API</div><div class="layer-items"><span class="chip">Django 4.2</span><span class="chip">Django REST Framework 3.14</span><span class="chip">SimpleJWT 5.5 + HttpOnly Cookies</span><span class="chip">Gunicorn WSGI</span></div></div>
+  <div class="stack-layer l3"><div class="layer-label">Async</div><div class="layer-items"><span class="chip">Celery 5.3 Worker</span><span class="chip">Celery Beat Scheduler</span><span class="chip">Redis 7 Broker</span></div></div>
+  <div class="stack-layer l4"><div class="layer-label">Database</div><div class="layer-items"><span class="chip">PostgreSQL 15</span><span class="chip">psycopg2</span><span class="chip">Django ORM</span></div></div>
+  <div class="stack-layer l5"><div class="layer-label">Infra</div><div class="layer-items"><span class="chip">Docker Compose</span><span class="chip">Whitenoise (static)</span><span class="chip">python-decouple (.env)</span></div></div>
+</div>
+</div>
+
+<hr/>
+
+<div class="section">
+<div class="section-title">2 &middot; Docker Service Topology</div>
+<p>Six containers on a private <code>medilink_network</code> bridge network. Only <strong>frontend :3000</strong> and <strong>backend :8000</strong> expose host ports. All other services communicate exclusively over the internal network.</p>
+<div class="arch-grid">
+  <div class="arch-card blue"><h3>&#127758; frontend</h3><ul><li>nginx:alpine<span class="tag tag-blue">3000:80</span></li><li>Serves React build (SPA)</li><li>Proxies /api/* to backend:8000</li><li>Forwards Set-Cookie headers</li><li>proxy_cookie_path rewriting</li></ul></div>
+  <div class="arch-card green"><h3>&#9881; backend</h3><ul><li>python:3.11-slim<span class="tag tag-green">8000:8000</span></li><li>Django + Gunicorn 4 workers</li><li>Runs migrate on startup</li><li>Collects static to /staticfiles</li><li>Depends on: db, redis</li></ul></div>
+  <div class="arch-card amber"><h3>&#128452; db (PostgreSQL 15)</h3><ul><li>postgres:15-alpine</li><li>Internal only, no host port</li><li>Volume: postgres_data</li><li>Health-checked (pg_isready)</li></ul></div>
+  <div class="arch-card red"><h3>&#128308; redis</h3><ul><li>redis:7-alpine</li><li>Internal only</li><li>Volume: redis_data</li><li>Celery broker + result backend</li></ul></div>
+  <div class="arch-card purple"><h3>&#9889; celery-worker</h3><ul><li>Same image as backend</li><li>cmd: celery -A medilink worker</li><li>Processes async task queue</li><li>Shares backend code</li></ul></div>
+  <div class="arch-card blue"><h3>&#128336; celery-beat</h3><ul><li>Same image as backend</li><li>cmd: celery -A medilink beat</li><li>Fires periodic schedules</li><li>Checks overdue invoices / hr</li></ul></div>
+</div>
+</div>
+
+<hr/>
+
+<div class="section">
+<div class="section-title">3 &middot; Authentication &amp; Token Flow</div>
+<p>Tokens are <strong>never exposed to JavaScript</strong>. Django sets them as HttpOnly cookies; the browser transmits them automatically. CSRF protection uses Django's double-submit cookie pattern with <code>X-CSRFToken</code> header.</p>
+<div class="cookie-box">
+  <h3>&#128272; Login &rarr; Establish Session</h3>
+  <div class="cookie-row"><div class="actor">Browser</div><span style="color:#60a5fa">&rarr;</span><div class="msg">POST /api/users/login/ &nbsp; { username, password }</div></div>
+  <div class="cookie-row"><div class="actor">Django</div><span style="color:#60a5fa">&rarr;</span><div class="msg">authenticate() &rarr; RefreshToken.for_user(user) &rarr; _set_auth_cookies(response, refresh_token)</div></div>
+  <div class="cookie-row"><div class="actor">Set-Cookie</div><span style="color:#60a5fa">&rarr;</span><div class="msg">medilink_access=JWT; HttpOnly; SameSite=Lax; Max-Age=3600; Path=/</div></div>
+  <div class="cookie-row"><div class="actor">Set-Cookie</div><span style="color:#60a5fa">&rarr;</span><div class="msg">medilink_refresh=JWT; HttpOnly; SameSite=Lax; Max-Age=604800; Path=/api/users/token/refresh/</div></div>
+  <div class="cookie-row"><div class="actor">Response</div><span style="color:#60a5fa">&rarr;</span><div class="msg">{ user: { id, username, role, first_name, last_name } } &nbsp; &lt;&lt; NO tokens in body &gt;&gt;</div></div>
+
+  <h3 style="margin-top:16px;">&#9851; Silent Token Refresh (401 Interceptor)</h3>
+  <div class="cookie-row"><div class="actor">Axios</div><span style="color:#60a5fa">&rarr;</span><div class="msg">Catches 401 &rarr; queues concurrent requests &rarr; POST /api/users/token/refresh/ (browser sends medilink_refresh cookie)</div></div>
+  <div class="cookie-row"><div class="actor">Django</div><span style="color:#60a5fa">&rarr;</span><div class="msg">Validates refresh JWT &rarr; blacklists old token &rarr; issues new access cookie + rotated refresh cookie</div></div>
+  <div class="cookie-row"><div class="actor">Axios</div><span style="color:#60a5fa">&rarr;</span><div class="msg">Replays original request; all queued requests resume automatically</div></div>
+
+  <h3 style="margin-top:16px;">&#128682; Logout</h3>
+  <div class="cookie-row"><div class="actor">Browser</div><span style="color:#60a5fa">&rarr;</span><div class="msg">POST /api/users/logout/ &rarr; Django blacklists refresh token in token_blacklist DB table</div></div>
+  <div class="cookie-row"><div class="actor">Set-Cookie</div><span style="color:#60a5fa">&rarr;</span><div class="msg">medilink_access=; Max-Age=0 &nbsp;&nbsp; medilink_refresh=; Max-Age=0 &nbsp;&nbsp; (cookies cleared)</div></div>
+
+  <div class="cookie-note"><strong>Security properties:</strong> &nbsp; HttpOnly &rarr; XSS immune &middot; SameSite=Lax &rarr; CSRF safe &middot; Secure=true (production, HTTPS only) &middot; Token blacklist &rarr; server-side invalidation on logout</div>
+</div>
+</div>
+
+<hr/>
+
+<div class="section">
+<div class="section-title">4 &middot; API Endpoint Reference</div>
+
+<div class="section-sub">Auth &amp; Users &mdash; /api/users/</div>
+<table class="api-table"><thead><tr><th>Method</th><th>Endpoint</th><th>Auth</th><th>Description</th></tr></thead><tbody>
+<tr><td><span class="method m-post">POST</span></td><td class="endpoint">/api/users/login/</td><td><span class="auth-badge auth-any">Any</span></td><td>Login &mdash; sets HttpOnly JWT access + refresh cookies</td></tr>
+<tr><td><span class="method m-post">POST</span></td><td class="endpoint">/api/users/logout/</td><td><span class="auth-badge auth-jwt">JWT Cookie</span></td><td>Logout &mdash; blacklists refresh token, clears cookies</td></tr>
+<tr><td><span class="method m-post">POST</span></td><td class="endpoint">/api/users/token/refresh/</td><td><span class="auth-badge auth-any">Cookie</span></td><td>Silent token refresh via HttpOnly refresh cookie</td></tr>
+<tr><td><span class="method m-post">POST</span></td><td class="endpoint">/api/users/</td><td><span class="auth-badge auth-any">Any</span></td><td>Register new user (patient or doctor)</td></tr>
+<tr><td><span class="method m-get">GET</span></td><td class="endpoint">/api/users/me/</td><td><span class="auth-badge auth-jwt">JWT Cookie</span></td><td>Get current user profile &mdash; used for session restoration</td></tr>
+<tr><td><span class="method m-patch">PATCH</span></td><td class="endpoint">/api/users/{id}/</td><td><span class="auth-badge auth-jwt">Owner/Admin</span></td><td>Update user profile fields</td></tr>
+<tr><td><span class="method m-get">GET</span></td><td class="endpoint">/api/users/doctors/</td><td><span class="auth-badge auth-jwt">JWT Cookie</span></td><td>List all doctors with DoctorProfiles</td></tr>
+<tr><td><span class="method m-get">GET</span></td><td class="endpoint">/api/users/patients/</td><td><span class="auth-badge auth-doctor">Doctor/Admin</span></td><td>List all patients</td></tr>
+<tr><td><span class="method m-get">GET</span></td><td class="endpoint">/api/csrf/</td><td><span class="auth-badge auth-any">Any</span></td><td>Prime CSRF cookie for SPA before first POST</td></tr>
+</tbody></table>
+
+<div class="section-sub">Appointments &mdash; /api/appointments/</div>
+<table class="api-table"><thead><tr><th>Method</th><th>Endpoint</th><th>Auth</th><th>Description</th></tr></thead><tbody>
+<tr><td><span class="method m-get">GET</span></td><td class="endpoint">/api/appointments/</td><td><span class="auth-badge auth-jwt">JWT Cookie</span></td><td>List appointments (filtered by role: own for patient/doctor)</td></tr>
+<tr><td><span class="method m-post">POST</span></td><td class="endpoint">/api/appointments/</td><td><span class="auth-badge auth-jwt">JWT Cookie</span></td><td>Create appointment; validates (doctor, date, time) uniqueness</td></tr>
+<tr><td><span class="method m-get">GET</span></td><td class="endpoint">/api/appointments/{id}/</td><td><span class="auth-badge auth-jwt">JWT Cookie</span></td><td>Get appointment detail</td></tr>
+<tr><td><span class="method m-patch">PATCH</span></td><td class="endpoint">/api/appointments/{id}/</td><td><span class="auth-badge auth-doctor">Doctor/Admin</span></td><td>Update status, notes, confirm or complete</td></tr>
+<tr><td><span class="method m-get">GET</span></td><td class="endpoint">/api/appointments/schedules/</td><td><span class="auth-badge auth-jwt">JWT Cookie</span></td><td>Doctor Schedule objects (availability blocks)</td></tr>
+</tbody></table>
+
+<div class="section-sub">Medical Records &mdash; /api/medical-records/</div>
+<table class="api-table"><thead><tr><th>Method</th><th>Endpoint</th><th>Auth</th><th>Description</th></tr></thead><tbody>
+<tr><td><span class="method m-get">GET</span></td><td class="endpoint">/api/medical-records/</td><td><span class="auth-badge auth-jwt">JWT Cookie</span></td><td>Patient sees own; doctor sees records they created; admin sees all</td></tr>
+<tr><td><span class="method m-post">POST</span></td><td class="endpoint">/api/medical-records/</td><td><span class="auth-badge auth-doctor">Doctor</span></td><td>Create medical record with nested prescriptions + lab tests</td></tr>
+<tr><td><span class="method m-get">GET</span></td><td class="endpoint">/api/medical-records/prescriptions/</td><td><span class="auth-badge auth-jwt">JWT Cookie</span></td><td>List prescriptions (scoped by role)</td></tr>
+<tr><td><span class="method m-get">GET</span></td><td class="endpoint">/api/medical-records/lab-tests/</td><td><span class="auth-badge auth-jwt">JWT Cookie</span></td><td>List ordered lab tests with results</td></tr>
+<tr><td><span class="method m-get">GET</span></td><td class="endpoint">/api/medical-records/vital-signs/</td><td><span class="auth-badge auth-jwt">JWT Cookie</span></td><td>List vital sign recordings for patient</td></tr>
+</tbody></table>
+
+<div class="section-sub">Billing &mdash; /api/billing/</div>
+<table class="api-table"><thead><tr><th>Method</th><th>Endpoint</th><th>Auth</th><th>Description</th></tr></thead><tbody>
+<tr><td><span class="method m-get">GET</span></td><td class="endpoint">/api/billing/invoices/</td><td><span class="auth-badge auth-jwt">JWT Cookie</span></td><td>List invoices (patient sees own; admin sees all)</td></tr>
+<tr><td><span class="method m-post">POST</span></td><td class="endpoint">/api/billing/invoices/</td><td><span class="auth-badge auth-admin">Admin</span></td><td>Create invoice; auto-generates INV-XXXXXXXX number</td></tr>
+<tr><td><span class="method m-post">POST</span></td><td class="endpoint">/api/billing/payments/</td><td><span class="auth-badge auth-admin">Admin</span></td><td>Record payment; triggers sync_payment_status() auto-update</td></tr>
+<tr><td><span class="method m-get">GET</span></td><td class="endpoint">/api/billing/insurance-claims/</td><td><span class="auth-badge auth-jwt">JWT Cookie</span></td><td>List insurance claims</td></tr>
+<tr><td><span class="method m-post">POST</span></td><td class="endpoint">/api/billing/insurance-claims/</td><td><span class="auth-badge auth-jwt">JWT Cookie</span></td><td>Submit claim; auto-generates CLM-XXXXXXXX number</td></tr>
+</tbody></table>
+</div>
+
+<hr/>
+
+<div class="section">
+<div class="section-title">5 &middot; Database Schema (PostgreSQL ERD)</div>
+<p>12 tables across 4 Django apps. Foreign keys enforce referential integrity at the DB level. Unique constraints prevent double-booking and duplicate profiles.</p>
+<div class="erd-grid">
+  <div class="erd-table"><div class="erd-head" style="background:#eff6ff;color:#1d4ed8;">&#128100; users_user</div><div class="erd-body">
+    <div class="erd-row"><span class="field erd-pk">id</span><span class="type">BigInt PK</span></div>
+    <div class="erd-row"><span class="field">username</span><span class="type">varchar unique</span></div>
+    <div class="erd-row"><span class="field">email / password</span><span class="type">varchar</span></div>
+    <div class="erd-row"><span class="field">role</span><span class="type">admin|doctor|patient</span></div>
+    <div class="erd-row"><span class="field">first_name, last_name</span><span class="type">varchar</span></div>
+    <div class="erd-row"><span class="field">phone, address</span><span class="type">varchar/text</span></div>
+    <div class="erd-row"><span class="field">date_of_birth</span><span class="type">date</span></div>
+  </div></div>
+  <div class="erd-table"><div class="erd-head" style="background:#f0fdf4;color:#15803d;">&#129658; users_doctorprofile</div><div class="erd-body">
+    <div class="erd-row"><span class="field erd-pk">id</span><span class="type">BigInt PK</span></div>
+    <div class="erd-row"><span class="field erd-fk">user_id</span><span class="type">FK user (1:1)</span></div>
+    <div class="erd-row"><span class="field">specialization</span><span class="type">varchar</span></div>
+    <div class="erd-row"><span class="field">license_number</span><span class="type">varchar unique</span></div>
+    <div class="erd-row"><span class="field">experience_years</span><span class="type">int</span></div>
+    <div class="erd-row"><span class="field">consultation_fee</span><span class="type">decimal</span></div>
+  </div></div>
+  <div class="erd-table"><div class="erd-head" style="background:#fef9c3;color:#b45309;">&#128197; appointments_appointment</div><div class="erd-body">
+    <div class="erd-row"><span class="field erd-pk">id</span><span class="type">BigInt PK</span></div>
+    <div class="erd-row"><span class="field erd-fk">patient_id</span><span class="type">FK user</span></div>
+    <div class="erd-row"><span class="field erd-fk">doctor_id</span><span class="type">FK user</span></div>
+    <div class="erd-row"><span class="field">date, time, duration</span><span class="type">date/time/int</span></div>
+    <div class="erd-row"><span class="field">status</span><span class="type">scheduled|confirmed|completed</span></div>
+    <div class="erd-row"><span class="field">reason, notes</span><span class="type">text</span></div>
+  </div></div>
+  <div class="erd-table"><div class="erd-head" style="background:#faf5ff;color:#7e22ce;">&#128203; medical_records_medicalrecord</div><div class="erd-body">
+    <div class="erd-row"><span class="field erd-pk">id</span><span class="type">BigInt PK</span></div>
+    <div class="erd-row"><span class="field erd-fk">patient_id</span><span class="type">FK user</span></div>
+    <div class="erd-row"><span class="field erd-fk">doctor_id</span><span class="type">FK user</span></div>
+    <div class="erd-row"><span class="field erd-fk">appointment_id</span><span class="type">FK appt (1:1)</span></div>
+    <div class="erd-row"><span class="field">diagnosis, symptoms</span><span class="type">text</span></div>
+    <div class="erd-row"><span class="field">treatment_plan</span><span class="type">text</span></div>
+  </div></div>
+  <div class="erd-table"><div class="erd-head" style="background:#fff7ed;color:#c2410c;">&#129534; billing_invoice</div><div class="erd-body">
+    <div class="erd-row"><span class="field erd-pk">id</span><span class="type">BigInt PK</span></div>
+    <div class="erd-row"><span class="field erd-fk">patient_id</span><span class="type">FK user</span></div>
+    <div class="erd-row"><span class="field erd-fk">appointment_id</span><span class="type">FK appt (nullable)</span></div>
+    <div class="erd-row"><span class="field">invoice_number</span><span class="type">INV-XXXXXXXX unique</span></div>
+    <div class="erd-row"><span class="field">status</span><span class="type">pending|paid|overdue</span></div>
+    <div class="erd-row"><span class="field">subtotal/tax/discount/total</span><span class="type">decimal</span></div>
+  </div></div>
+  <div class="erd-table"><div class="erd-head" style="background:#fff7ed;color:#c2410c;">&#128179; billing_payment</div><div class="erd-body">
+    <div class="erd-row"><span class="field erd-pk">id</span><span class="type">BigInt PK</span></div>
+    <div class="erd-row"><span class="field erd-fk">invoice_id</span><span class="type">FK invoice</span></div>
+    <div class="erd-row"><span class="field">amount</span><span class="type">decimal</span></div>
+    <div class="erd-row"><span class="field">payment_method</span><span class="type">cash|card|insurance|online</span></div>
+    <div class="erd-row"><span class="field">transaction_id</span><span class="type">varchar</span></div>
+  </div></div>
+</div>
+<div class="section-sub">Entity Relationships</div>
+<table class="rel-table">
+  <tr><td><strong>User (patient)</strong></td><td>&rarr;</td><td>Many Appointments as patient_appointments</td></tr>
+  <tr><td><strong>User (doctor)</strong></td><td>&rarr;</td><td>Many Appointments as doctor_appointments + Doctor Schedule slots</td></tr>
+  <tr><td><strong>Appointment</strong></td><td>&rarr;</td><td>One MedicalRecord (OneToOne) + One Invoice (nullable FK)</td></tr>
+  <tr><td><strong>MedicalRecord</strong></td><td>&rarr;</td><td>Many Prescriptions, LabTests; Patient has separate VitalSigns</td></tr>
+  <tr><td><strong>Invoice</strong></td><td>&rarr;</td><td>Many InvoiceItems, Payments, InsuranceClaims</td></tr>
+  <tr><td><strong>User</strong></td><td>&rarr;</td><td>One DoctorProfile OR one PatientProfile (1:1, determined by role)</td></tr>
+</table>
+</div>
+
+<hr/>
+
+<div class="section">
+<div class="section-title">6 &middot; End-to-End Data Flows</div>
+<div class="section-sub">6.1 &middot; Appointment Booking Flow</div>
+<div class="flow">
+  <div class="flow-step"><div class="step-col"><div class="step-num" style="background:#1d4ed8;">1</div><div class="step-line"></div></div><div class="step-body"><h4>Patient browses doctors &amp; availability</h4><p><code>GET /api/users/doctors/</code> + <code>GET /api/appointments/schedules/</code> populate doctor list and available time slots in the React Appointments component.</p></div></div>
+  <div class="flow-step"><div class="step-col"><div class="step-num" style="background:#1d4ed8;">2</div><div class="step-line"></div></div><div class="step-body"><h4>Patient submits booking</h4><p><code>POST /api/appointments/</code> body: <code>{patient, doctor, appointment_date, appointment_time, reason}</code>. JWT cookie authenticates the request automatically via CookieJWTAuthentication.</p></div></div>
+  <div class="flow-step"><div class="step-col"><div class="step-num" style="background:#1d4ed8;">3</div><div class="step-line"></div></div><div class="step-body"><h4>DRF validates &amp; persists</h4><p>AppointmentSerializer validates unique_together constraint <code>(doctor, date, time)</code>. Django ORM writes row to <code>appointments_appointment</code> table. Returns 201 Created with appointment data.</p></div></div>
+  <div class="flow-step"><div class="step-col"><div class="step-num" style="background:#1d4ed8;">4</div><div class="step-line"></div></div><div class="step-body"><h4>Doctor confirms &amp; completes</h4><p><code>PATCH /api/appointments/{id}/</code> transitions: scheduled &rarr; confirmed &rarr; completed. Doctor then creates a MedicalRecord linked to this appointment (OneToOne).</p></div></div>
+</div>
+
+<div class="section-sub">6.2 &middot; Medical Record &amp; Billing Flow</div>
+<div class="flow">
+  <div class="flow-step"><div class="step-col"><div class="step-num" style="background:#15803d;">1</div><div class="step-line"></div></div><div class="step-body"><h4>Doctor creates medical record</h4><p><code>POST /api/medical-records/</code> with diagnosis, symptoms, treatment plan. Prescriptions and LabTests created as nested objects. VitalSigns recorded via separate endpoint.</p></div></div>
+  <div class="flow-step"><div class="step-col"><div class="step-num" style="background:#15803d;">2</div><div class="step-line"></div></div><div class="step-body"><h4>Admin generates invoice</h4><p><code>POST /api/billing/invoices/</code> linked to appointment. Auto-generates <code>INV-XXXXXXXX</code>. InvoiceItems added for consultation fee and tests. <code>total = subtotal + tax - discount</code>.</p></div></div>
+  <div class="flow-step"><div class="step-col"><div class="step-num" style="background:#15803d;">3</div><div class="step-line"></div></div><div class="step-body"><h4>Patient views &amp; pays</h4><p><code>GET /api/billing/invoices/</code> (scoped to own). <code>POST /api/billing/payments/</code> records payment. <code>Invoice.sync_payment_status()</code> auto-updates: pending &rarr; partially_paid &rarr; paid.</p></div></div>
+  <div class="flow-step"><div class="step-col"><div class="step-num" style="background:#15803d;">4</div><div class="step-line"></div></div><div class="step-body"><h4>Celery Beat: overdue detection</h4><p>Celery Beat fires <code>billing.tasks.check_overdue_invoices</code> every 3600s. Invoices past <code>due_date</code> with pending/partially_paid status are bulk-updated to <code>overdue</code>.</p></div></div>
+</div>
+
+<div class="section-sub">6.3 &middot; Role-Based Access Control (RBAC)</div>
+<div class="arch-grid">
+  <div class="arch-card blue"><h3>&#128081; Admin</h3><ul><li>Full CRUD on all resources</li><li>Create &amp; manage invoices</li><li>Record payments for any patient</li><li>View all appointments &amp; records</li><li>Access Django /admin panel</li></ul></div>
+  <div class="arch-card green"><h3>&#129658; Doctor</h3><ul><li>View own appointments only</li><li>Create &amp; edit medical records</li><li>Write prescriptions &amp; lab orders</li><li>Record vital signs for any patient</li><li>View patient list</li></ul></div>
+  <div class="arch-card amber"><h3>&#129657; Patient</h3><ul><li>Book appointments with any doctor</li><li>View own appointments &amp; records</li><li>View own invoices &amp; payments</li><li>Submit insurance claims</li></ul></div>
+</div>
+</div>
+
+<hr/>
+
+<div class="section">
+<div class="section-title">7 &middot; Async Processing Pipeline (Celery + Redis)</div>
+<p>Background tasks run outside the HTTP cycle, keeping API responses fast. Celery Beat handles scheduled jobs independently from worker tasks.</p>
+<div class="pipeline">
+  <div class="node" style="background:#eff6ff;border-color:#bfdbfe;">Django View<br/><small style="color:#94a3b8;font-size:9.5px;">dispatches .delay()</small></div>
+  <div class="arrow-h">&rarr;</div>
+  <div class="node" style="background:#fef9c3;border-color:#fde68a;">Redis Queue<br/><small style="color:#94a3b8;font-size:9.5px;">message broker</small></div>
+  <div class="arrow-h">&rarr;</div>
+  <div class="node" style="background:#f0fdf4;border-color:#bbf7d0;">Celery Worker<br/><small style="color:#94a3b8;font-size:9.5px;">executes task</small></div>
+  <div class="arrow-h">&rarr;</div>
+  <div class="node" style="background:#faf5ff;border-color:#e9d5ff;">PostgreSQL<br/><small style="color:#94a3b8;font-size:9.5px;">DB write</small></div>
+  <div class="arrow-h">&rarr;</div>
+  <div class="node" style="background:#fff7ed;border-color:#fed7aa;">Redis Result<br/><small style="color:#94a3b8;font-size:9.5px;">result backend</small></div>
+</div>
+<div style="margin-top:14px;">
+<div class="pipeline">
+  <div class="node" style="background:#ffe4e6;border-color:#fecdd3;">Celery Beat<br/><small style="color:#94a3b8;font-size:9.5px;">every 3600s</small></div>
+  <div class="arrow-h">&rarr;</div>
+  <div class="node" style="background:#fef9c3;border-color:#fde68a;">check_overdue<br/>_invoices task</div>
+  <div class="arrow-h">&rarr;</div>
+  <div class="node" style="background:#faf5ff;border-color:#e9d5ff;">Invoice.objects<br/><small style="color:#94a3b8;font-size:9.5px;">.filter().update(overdue)</small></div>
+</div>
+</div>
+</div>
+
+<div class="footer">
+  <div><strong>MediLink HMS</strong> &mdash; System Architecture Document</div>
+  <div>Generated: September 2026 &middot; Django 4.2 &middot; React 18 &middot; PostgreSQL 15</div>
+  <div>github.com/gunjansonaw/MediLink</div>
+</div>
+</div>
+</body>
+</html>
