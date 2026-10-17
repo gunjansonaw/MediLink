@@ -107,7 +107,7 @@ spec:
           image: medilink-backend:local
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "-c"]
-          args: ["python manage.py migrate --noinput && python manage.py collectstatic --noinput"]
+          args: ["python manage.py migrate --noinput"]
           envFrom:
             - secretRef:
                 name: medilink-secrets
