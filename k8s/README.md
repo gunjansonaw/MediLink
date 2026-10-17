@@ -19,7 +19,7 @@ The backend image collects Django static assets at build time so every API Pod h
 2. Create namespace, Secret and ConfigMap:
 
 ```powershell
-kubectl create namespace medilink --dry-run=client -o yaml | kubectl apply -f -
+kubectl apply -f k8s/namespace.yaml
 kubectl -n medilink create secret generic medilink-secrets --from-env-file=k8s/.env --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply -f k8s/configmap.yaml
 ```
@@ -36,8 +36,9 @@ kubectl rollout status deployment/redis -n medilink --timeout=120s
 4. Deploy application workloads:
 
 ```powershell
-kubectl apply -f k8s/app.yaml
+kubectl apply -f k8s/migration-job.yaml
 kubectl rollout status job/backend-migrate -n medilink --timeout=300s
+kubectl apply -f k8s/app.yaml
 kubectl rollout status deployment/backend -n medilink --timeout=180s
 kubectl rollout status deployment/celery-worker -n medilink --timeout=180s
 kubectl rollout status deployment/celery-beat -n medilink --timeout=180s
