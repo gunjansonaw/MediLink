@@ -1,6 +1,6 @@
 # MediLink on Kubernetes
 
-This is a local-learning Kubernetes deployment for MediLink. It keeps the existing Django modular monolith and deploys PostgreSQL, Redis, Django API, Celery worker, Celery Beat, and React/Nginx frontend separately.
+This is a local-learning Kubernetes deployment for MediLink. It keeps the Django modular monolith and deploys PostgreSQL, Redis, Django API, Celery worker, Celery Beat, and React/Nginx frontend separately.
 
 ## Build images
 
@@ -11,11 +11,11 @@ docker build -t medilink-backend:local ./backend
 docker build --build-arg REACT_APP_API_URL=/api -t medilink-frontend:local ./frontend
 ```
 
-If Kubernetes cannot access the local Docker image store, push the images to a registry and update image names in `k8s/app.yaml`.
+The backend image collects Django static assets at build time so every API Pod has its own copy. If the cluster cannot access Docker Desktop's image store, push the images to a registry and update image names in `k8s/app.yaml`.
 
 ## Deploy locally
 
-1. Copy `k8s/.env.example` to `k8s/.env`, then replace the values. Never commit `k8s/.env`.
+1. Copy `k8s/.env.example` to `k8s/.env`, edit the values, and never commit `k8s/.env`.
 2. Create namespace, Secret and ConfigMap:
 
 ```powershell
@@ -33,7 +33,7 @@ kubectl apply -f k8s/redis.yaml
 kubectl rollout status deployment/redis -n medilink --timeout=120s
 ```
 
-4. Deploy workloads:
+4. Deploy application workloads:
 
 ```powershell
 kubectl apply -f k8s/app.yaml
@@ -45,15 +45,15 @@ kubectl rollout status deployment/frontend -n medilink --timeout=180s
 kubectl get pods,svc,pvc -n medilink
 ```
 
-5. Start a port-forward:
+5. Open the frontend:
 
 ```powershell
 kubectl port-forward -n medilink service/frontend 3000:80
 ```
 
-Open http://localhost:3000. To access API-only endpoints in a separate terminal, run `kubectl port-forward -n medilink service/backend 8000:8000`.
+Browse to http://localhost:3000. Optionally expose API-only endpoints in another terminal with `kubectl port-forward -n medilink service/backend 8000:8000`.
 
-6. Seed demo data only when you need it:
+6. Seed demonstration data only when needed:
 
 ```powershell
 kubectl exec -n medilink deployment/backend -- python manage.py seed_demo_data
@@ -71,11 +71,11 @@ kubectl get events -n medilink --sort-by=.metadata.creationTimestamp
 
 ## Scope and production gaps
 
-- This is a learning setup, not a production healthcare deployment.
+- This is a local development and learning setup, not a production healthcare deployment.
 - A PVC is not a backup; configure and test backups and restores before storing important data.
 - Local image availability and storage classes vary by cluster.
-- Schema migration runs as a Kubernetes Job instead of racing from every API replica. For production releases, run a controlled pre-deploy migration step and use backward-compatible migrations.
-- Static assets are collected by the migration Job into its own ephemeral filesystem. Verify the static-file serving path for your environment; for production, use an explicit shared/object-storage strategy for static assets and media. Media uploads are not persisted by these manifests.
+- Schema migration runs as a Kubernetes Job rather than racing from every API replica. For production releases, use a controlled pre-deploy migration step and backward-compatible migrations.
+- Media uploads are not persisted by these manifests. Use durable object storage or a deliberately configured shared volume before relying on uploads.
 - PostgreSQL and Redis are single instances; no HA is configured.
 - Before production, add TLS/Ingress, managed secrets, network policies, Pod security controls, resource sizing, database connection pooling, monitoring, and tested recovery.
 - Do not use demo credentials or sample secrets in a real deployment.
