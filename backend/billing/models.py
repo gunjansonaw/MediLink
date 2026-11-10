@@ -42,15 +42,28 @@ class Invoice(models.Model):
     def remaining_balance(self):
         return max(Decimal('0.00'), self.total - self.total_paid)
 
+    def recalculate_from_items(self):
+        """Set subtotal from line items (when there are any) and re-save."""
+        items_total = self.items.aggregate(total=models.Sum('total'))['total']
+        if items_total is not None:
+            self.subtotal = items_total
+            self.save()
+
     def sync_payment_status(self):
+        """Derive status from payments + due date. Cancelled is terminal."""
+        from django.utils import timezone
+        if self.status == 'cancelled':
+            return
         total_paid = self.total_paid
         if total_paid >= self.total and self.total > 0:
             self.status = 'paid'
+        elif self.due_date and self.due_date < timezone.localdate():
+            self.status = 'overdue'
         elif total_paid > 0:
             self.status = 'partially_paid'
-        elif self.status not in ['cancelled', 'overdue']:
+        else:
             self.status = 'pending'
-        self.save(update_fields=['status'])
+        self.save(update_fields=['status', 'updated_at'])
 
     def save(self, *args, **kwargs):
         # Auto-generate invoice number if not provided
@@ -58,8 +71,8 @@ class Invoice(models.Model):
             import uuid
             self.invoice_number = f"INV-{uuid.uuid4().hex[:8].upper()}"
         
-        # Calculate total
-        self.total = self.subtotal + self.tax - self.discount
+        # Calculate total (never negative)
+        self.total = max(Decimal('0.00'), (self.subtotal or 0) + (self.tax or 0) - (self.discount or 0))
         super().save(*args, **kwargs)
 
 

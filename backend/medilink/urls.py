@@ -26,6 +26,22 @@ schema_view = get_schema_view(
 )
 
 
+def health_view(request):
+    """Liveness probe: the process is up."""
+    return JsonResponse({'status': 'ok'})
+
+
+def ready_view(request):
+    """Readiness probe: the database is reachable."""
+    from django.db import connection
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT 1')
+    except Exception:
+        return JsonResponse({'status': 'unavailable'}, status=503)
+    return JsonResponse({'status': 'ready'})
+
+
 def csrf_token_view(request):
     """
     GET /api/csrf/ — Returns a JSON response whose only purpose is to trigger
@@ -42,6 +58,9 @@ urlpatterns = [
     path('api/appointments/', include('appointments.urls')),
     path('api/medical-records/', include('medical_records.urls')),
     path('api/billing/', include('billing.urls')),
+    path('api/ai/', include('ai_agents.urls')),
+    path('api/health/', health_view, name='health'),
+    path('api/ready/', ready_view, name='ready'),
 
     # CSRF cookie endpoint — call once on app init so JS can read the cookie
     path('api/csrf/', csrf_token_view, name='csrf-token'),

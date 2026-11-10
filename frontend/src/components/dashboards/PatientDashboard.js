@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Row, Col, Card, Statistic, List, Tag, Typography,
-  Space, Spin, Empty, Badge,
+  Space, Spin, Empty,
 } from 'antd';
 import {
   CalendarOutlined, FileTextOutlined, DollarOutlined,
@@ -32,12 +32,13 @@ function PatientDashboard() {
         const [appointmentsRes, recordsRes, invoicesRes] = await Promise.all([
           api.get('/appointments/appointments/upcoming/'),
           api.get('/medical-records/records/my_records/'),
-          api.get('/billing/invoices/?status=pending'),
+          // partially paid and overdue invoices also have money owing
+          api.get('/billing/invoices/?status_in=pending,partially_paid,overdue'),
         ]);
 
-        setUpcomingAppointments(appointmentsRes.data.slice(0, 5));
-        setRecentRecords(recordsRes.data.slice(0, 5));
-        setPendingInvoices(invoicesRes.data.results?.slice(0, 5) || []);
+        setUpcomingAppointments(appointmentsRes.data);
+        setRecentRecords(recordsRes.data);
+        setPendingInvoices(invoicesRes.data.results || invoicesRes.data || []);
       } catch (error) {
         // silently fail on dashboard load errors
       } finally {
@@ -85,7 +86,7 @@ function PatientDashboard() {
         <Col xs={24} sm={8}>
           <Card className="stat-card-hover" bordered={false} style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
             <Statistic
-              title="Pending Invoices"
+              title="Open Invoices"
               value={pendingInvoices.length}
               prefix={<DollarOutlined style={{ color: '#faad14' }} />}
               valueStyle={{ color: '#faad14' }}
@@ -107,7 +108,7 @@ function PatientDashboard() {
               <Empty description="No upcoming appointments" image={Empty.PRESENTED_IMAGE_SIMPLE} />
             ) : (
               <List
-                dataSource={upcomingAppointments}
+                dataSource={upcomingAppointments.slice(0, 5)}
                 renderItem={(apt) => (
                   <List.Item
                     key={apt.id}
@@ -135,7 +136,7 @@ function PatientDashboard() {
               <Empty description="No medical records" image={Empty.PRESENTED_IMAGE_SIMPLE} />
             ) : (
               <List
-                dataSource={recentRecords}
+                dataSource={recentRecords.slice(0, 5)}
                 renderItem={(record) => (
                   <List.Item key={record.id}>
                     <List.Item.Meta
@@ -152,23 +153,25 @@ function PatientDashboard() {
         {/* Pending Invoices */}
         <Col xs={24} lg={8}>
           <Card
-            title={<Space><DollarOutlined style={{ color: '#faad14' }} /><span>Pending Invoices</span></Space>}
+            title={<Space><DollarOutlined style={{ color: '#faad14' }} /><span>Open Invoices</span></Space>}
             bordered={false}
             style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.06)', height: '100%' }}
           >
             {pendingInvoices.length === 0 ? (
-              <Empty description="No pending invoices" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              <Empty description="No open invoices" image={Empty.PRESENTED_IMAGE_SIMPLE} />
             ) : (
               <List
-                dataSource={pendingInvoices}
+                dataSource={pendingInvoices.slice(0, 5)}
                 renderItem={(inv) => (
                   <List.Item
                     key={inv.id}
-                    extra={<Text strong style={{ color: '#faad14' }}>${parseFloat(inv.total).toFixed(2)}</Text>}
+                    extra={<Text strong style={{ color: inv.status === 'overdue' ? '#ff4d4f' : '#faad14' }}>
+                      ${parseFloat(inv.remaining_balance ?? inv.total).toFixed(2)}
+                    </Text>}
                   >
                     <List.Item.Meta
                       title={`Invoice #${inv.invoice_number}`}
-                      description={`Due: ${inv.due_date}`}
+                      description={`Due: ${inv.due_date}${inv.status === 'overdue' ? ' · overdue' : ''}`}
                     />
                   </List.Item>
                 )}

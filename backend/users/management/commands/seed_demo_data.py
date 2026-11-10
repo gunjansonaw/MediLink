@@ -4,8 +4,8 @@ from datetime import timedelta, date, time
 from decimal import Decimal
 from users.models import User, DoctorProfile, PatientProfile
 from appointments.models import Appointment, Schedule
-from medical_records.models import MedicalRecord, Prescription
-from billing.models import Invoice, InvoiceItem, Payment
+from medical_records.models import MedicalRecord, Prescription, LabTest, VitalSigns
+from billing.models import Invoice, InvoiceItem, Payment, InsuranceClaim
 
 
 class Command(BaseCommand):
@@ -252,6 +252,61 @@ class Command(BaseCommand):
             }
         )
         inv2.sync_payment_status()
+
+        # 7. AI-agent demo data: history, vitals, labs, an overdue bill, a claim
+        past = today - timedelta(days=21)
+        apt_past, _ = Appointment.objects.get_or_create(
+            doctor=dr_sarah, appointment_date=past, appointment_time=time(11, 0),
+            defaults={'patient': patient_john, 'status': 'completed', 'duration_minutes': 30,
+                      'reason': 'Blood pressure review and lipid panel.'},
+        )
+        Appointment.objects.get_or_create(
+            doctor=dr_james, appointment_date=today - timedelta(days=10), appointment_time=time(9, 0),
+            defaults={'patient': patient_emma, 'status': 'no_show', 'reason': 'Allergy follow-up.'},
+        )
+        rec_past, _ = MedicalRecord.objects.get_or_create(
+            patient=patient_john, doctor=dr_sarah, appointment=apt_past,
+            defaults={'diagnosis': 'Hypertension follow-up; borderline hyperlipidemia',
+                      'symptoms': 'Occasional headaches, no chest pain.',
+                      'treatment_plan': 'Continue lisinopril, lipid panel ordered, recheck in 4 weeks.'},
+        )
+        if not VitalSigns.objects.filter(patient=patient_john).exists():
+            for days_ago, sys_bp, dia_bp in [(60, 132, 84), (35, 136, 86), (21, 142, 91)]:
+                v = VitalSigns.objects.create(
+                    patient=patient_john, recorded_by=dr_sarah, blood_pressure_systolic=sys_bp,
+                    blood_pressure_diastolic=dia_bp, heart_rate=78, temperature=Decimal('36.8'),
+                    oxygen_saturation=98, weight=Decimal('88.5'), height=Decimal('178'),
+                )
+                VitalSigns.objects.filter(pk=v.pk).update(recorded_at=timezone.now() - timedelta(days=days_ago))
+        LabTest.objects.get_or_create(
+            medical_record=rec_past, test_name='Lipid Panel',
+            defaults={'test_type': 'Blood', 'status': 'completed', 'completed_date': timezone.now() - timedelta(days=19),
+                      'result': 'Total cholesterol 228 mg/dL, LDL 162 mg/dL, HDL 41 mg/dL, Triglycerides 175 mg/dL'},
+        )
+        LabTest.objects.get_or_create(
+            medical_record=rec_past, test_name='HbA1c',
+            defaults={'test_type': 'Blood', 'status': 'ordered'},
+        )
+        inv_old, created_old = Invoice.objects.get_or_create(
+            invoice_number='INV-2026-003',
+            defaults={'patient': patient_john, 'appointment': apt_past, 'due_date': past + timedelta(days=7) - timedelta(days=20),
+                      'subtotal': Decimal('160.00'), 'tax': Decimal('12.80'), 'discount': Decimal('0.00'),
+                      'total': Decimal('172.80'), 'notes': 'BP review and lipid panel.'},
+        )
+        if created_old:
+            InvoiceItem.objects.create(invoice=inv_old, description='Cardiology follow-up consultation',
+                                       quantity=1, unit_price=Decimal('120.00'))
+            InvoiceItem.objects.create(invoice=inv_old, description='Lipid panel', quantity=1, unit_price=Decimal('40.00'))
+            inv_old.sync_payment_status()
+            InsuranceClaim.objects.create(
+                patient=patient_john, invoice=inv_old, insurance_provider='BlueCross Healthcare',
+                insurance_policy_number='BC-77291-884', claim_amount=Decimal('150.00'),
+            )
+        for doc, days in [(dr_sarah, ['monday', 'tuesday', 'thursday', 'friday']),
+                          (dr_james, ['monday', 'wednesday', 'friday'])]:
+            for day in days:
+                Schedule.objects.get_or_create(doctor=doc, day_of_week=day, start_time=time(9, 0),
+                                               defaults={'end_time': time(17, 0)})
 
         self.stdout.write(self.style.SUCCESS('\n========================================='))
         self.stdout.write(self.style.SUCCESS('  MediLink SaaS Demo Data Ready!'))
