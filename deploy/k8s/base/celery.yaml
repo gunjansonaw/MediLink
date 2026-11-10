@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: celery-worker
+  labels: {app.kubernetes.io/name: celery-worker, app.kubernetes.io/part-of: medilink}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: celery-worker}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: celery-worker
+        app.kubernetes.io/part-of: medilink
+        medilink.io/db-client: "true"
+    spec:
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: worker
+          image: medilink-backend
+          command: ["celery", "-A", "medilink", "worker", "-l", "info", "--concurrency", "2"]
+          envFrom:
+            - configMapRef: {name: medilink-config}
+            - secretRef: {name: medilink-secrets}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {memory: 768Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: celery-beat
+  labels: {app.kubernetes.io/name: celery-beat, app.kubernetes.io/part-of: medilink}
+spec:
+  # Exactly one scheduler, ever: Recreate avoids two beats during a rollout
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app.kubernetes.io/name: celery-beat}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: celery-beat
+        app.kubernetes.io/part-of: medilink
+        medilink.io/db-client: "true"
+    spec:
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: beat
+          image: medilink-backend
+          command: ["celery", "-A", "medilink", "beat", "-l", "info", "--schedule", "/tmp/celerybeat-schedule"]
+          envFrom:
+            - configMapRef: {name: medilink-config}
+            - secretRef: {name: medilink-secrets}
+          resources:
+            requests: {cpu: 20m, memory: 128Mi}
+            limits: {memory: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: tmp
+          emptyDir: {}

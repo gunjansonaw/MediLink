@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: medilink
+  labels:
+    app.kubernetes.io/part-of: medilink
+    # Enforce the "restricted" Pod Security Standard for every workload
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted
