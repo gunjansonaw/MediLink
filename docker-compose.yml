@@ -1,7 +1,29 @@
+# MediLink — local production-like stack
+#   docker compose up --build -d
+#   docker compose exec backend python manage.py seed_demo_data
+# App: http://localhost:3000   (API is proxied under /api by the frontend nginx)
+
+x-backend-env: &backend-env
+  SECRET_KEY: ${SECRET_KEY:-django-insecure-local-compose-only-change-me}
+  DEBUG: ${DEBUG:-True}
+  ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,backend,frontend}
+  DB_NAME: ${DB_NAME:-medilink}
+  DB_USER: ${DB_USER:-postgres}
+  DB_PASSWORD: ${DB_PASSWORD:-postgrespassword}
+  DB_HOST: db
+  DB_PORT: 5432
+  CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+  CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+  COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
+  COOKIE_SECURE: ${COOKIE_SECURE:-False}
+  CELERY_BROKER_URL: redis://redis:6379/0
+  CELERY_RESULT_BACKEND: redis://redis:6379/0
+  # AI agents: leave ANTHROPIC_API_KEY empty to run in rules-only mode
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  AI_MODEL: ${AI_MODEL:-claude-opus-5-5}
+  AI_EFFORT: ${AI_EFFORT:-medium}
+
 services:
-  # -----------------------------------------------------------
-  # 1. PostgreSQL Relational Database Service
-  # -----------------------------------------------------------
   db:
     image: postgres:15-alpine
     container_name: medilink_db
@@ -10,168 +32,98 @@ services:
       POSTGRES_DB: ${DB_NAME:-medilink}
       POSTGRES_USER: ${DB_USER:-postgres}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-postgrespassword}
-    ports:
-      - "${DB_PORT:-5432}:5432"
+    # Uncomment to reach Postgres from the host:
+    # ports: ["5432:5432"]
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-medilink}"]
       interval: 5s
       timeout: 5s
-      retries: 5
-    networks:
-      - medilink_network
+      retries: 10
+    networks: [medilink_network]
 
-  # -----------------------------------------------------------
-  # 2. Redis In-Memory Cache & Celery Message Broker
-  # -----------------------------------------------------------
   redis:
     image: redis:7-alpine
     container_name: medilink_redis
     restart: unless-stopped
-    ports:
-      - "6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
-      retries: 5
-    networks:
-      - medilink_network
+      retries: 10
+    networks: [medilink_network]
 
-  # -----------------------------------------------------------
-  # 3. Django REST API Backend (Gunicorn WSGI)
-  # -----------------------------------------------------------
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    build: ./backend
+    image: medilink-backend:local
     container_name: medilink_backend
     restart: unless-stopped
     environment:
-      SECRET_KEY: ${SECRET_KEY:-django-insecure-saas-interview-secret-key-prod-2026}
-      DEBUG: ${DEBUG:-True}
-      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,backend,frontend,web,*}
-      DB_NAME: ${DB_NAME:-medilink}
-      DB_USER: ${DB_USER:-postgres}
-      DB_PASSWORD: ${DB_PASSWORD:-postgrespassword}
-      DB_HOST: db
-      DB_PORT: 5432
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://localhost}
-      CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://localhost}
-      COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      <<: *backend-env
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-0}
     ports:
       - "8000:8000"
     volumes:
-      - ./backend:/app
-      - static_volume:/app/staticfiles
       - media_volume:/app/media
     depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    networks:
-      - medilink_network
+      db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health/')"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks: [medilink_network]
 
-  # -----------------------------------------------------------
-  # 4. Celery Asynchronous Background Worker
-  # -----------------------------------------------------------
   celery-worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: medilink-backend:local
     container_name: medilink_celery_worker
     restart: unless-stopped
-    entrypoint: []
-    command: celery -A medilink worker -l info
     environment:
-      SECRET_KEY: ${SECRET_KEY:-django-insecure-saas-interview-secret-key-prod-2026}
-      DEBUG: ${DEBUG:-True}
-      ALLOWED_HOSTS: '*'
-      DB_NAME: ${DB_NAME:-medilink}
-      DB_USER: ${DB_USER:-postgres}
-      DB_PASSWORD: ${DB_PASSWORD:-postgrespassword}
-      DB_HOST: db
-      DB_PORT: 5432
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      <<: *backend-env
+      RUN_MIGRATIONS: "0"
+    command: celery -A medilink worker -l info --concurrency 2
     depends_on:
-      backend:
-        condition: service_started
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./backend:/app
-    networks:
-      - medilink_network
+      backend: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    networks: [medilink_network]
 
-  # -----------------------------------------------------------
-  # 5. Celery Beat Periodic Scheduler (Cron / Reminders)
-  # -----------------------------------------------------------
   celery-beat:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: medilink-backend:local
     container_name: medilink_celery_beat
     restart: unless-stopped
-    entrypoint: []
-    command: celery -A medilink beat -l info
     environment:
-      SECRET_KEY: ${SECRET_KEY:-django-insecure-saas-interview-secret-key-prod-2026}
-      DEBUG: ${DEBUG:-True}
-      ALLOWED_HOSTS: '*'
-      DB_NAME: ${DB_NAME:-medilink}
-      DB_USER: ${DB_USER:-postgres}
-      DB_PASSWORD: ${DB_PASSWORD:-postgrespassword}
-      DB_HOST: db
-      DB_PORT: 5432
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      <<: *backend-env
+      RUN_MIGRATIONS: "0"
+    command: celery -A medilink beat -l info --schedule /tmp/celerybeat-schedule
     depends_on:
-      backend:
-        condition: service_started
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./backend:/app
-    networks:
-      - medilink_network
+      backend: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    networks: [medilink_network]
 
-  # -----------------------------------------------------------
-  # 6. React Single Page Application (Nginx Alpine)
-  # -----------------------------------------------------------
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
       args:
         REACT_APP_API_URL: /api
+    image: medilink-frontend:local
     container_name: medilink_frontend
     restart: unless-stopped
+    environment:
+      BACKEND_UPSTREAM: http://backend:8000
     ports:
-      - "3000:80"
+      - "3000:8080"
     depends_on:
       - backend
-    networks:
-      - medilink_network
+    networks: [medilink_network]
 
-# -----------------------------------------------------------
-# Persistent Volumes & Private Bridge Network
-# -----------------------------------------------------------
 volumes:
   postgres_data:
-    driver: local
   redis_data:
-    driver: local
-  static_volume:
-    driver: local
   media_volume:
-    driver: local
 
 networks:
   medilink_network:
