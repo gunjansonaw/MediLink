@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: medilink
+
+resources:
+  - namespace.yaml
+  - config.yaml
+  - postgres.yaml
+  - redis.yaml
+  - backend.yaml
+  - celery.yaml
+  - frontend.yaml
+  - ingress.yaml
+  - networkpolicy.yaml
+
+# Overlays pin these to real registries/tags
+images:
+  - name: medilink-backend
+    newName: medilink-backend
+    newTag: local
+  - name: medilink-frontend
+    newName: medilink-frontend
+    newTag: local

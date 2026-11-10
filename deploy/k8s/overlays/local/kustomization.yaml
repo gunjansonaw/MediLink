@@ -1,0 +1,59 @@
+# Local cluster (kind / minikube / Docker Desktop) — plain HTTP on
+# http://medilink.localtest.me (localtest.me always resolves to 127.0.0.1).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: medilink
+
+resources:
+  - ../../base
+  - seed-job.yaml
+
+# Dev-only secrets. Put a real ANTHROPIC_API_KEY in local.secrets.env to enable
+# the Claude agent; leave it empty to run the rules-only assistant.
+secretGenerator:
+  - name: medilink-secrets
+    envs: [local.secrets.env]
+
+patches:
+  - target: {kind: ConfigMap, name: medilink-config}
+    patch: |-
+      - op: replace
+        path: /data/ALLOWED_HOSTS
+        value: medilink.localtest.me,localhost,127.0.0.1,backend
+      - op: replace
+        path: /data/CSRF_TRUSTED_ORIGINS
+        value: http://medilink.localtest.me,http://localhost:8080
+      - op: replace
+        path: /data/CORS_ALLOWED_ORIGINS
+        value: http://medilink.localtest.me,http://localhost:8080
+      - op: replace
+        path: /data/COOKIE_SECURE
+        value: "False"
+  - target: {kind: Ingress, name: medilink}
+    patch: |-
+      - op: add
+        path: /spec/ingressClassName
+        value: nginx
+      - op: replace
+        path: /spec/rules/0/host
+        value: medilink.localtest.me
+  # Smaller footprint for laptops
+  - target: {kind: Deployment, name: frontend}
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target: {kind: StatefulSet, name: postgres}
+    patch: |-
+      - op: replace
+        path: /spec/volumeClaimTemplates/0/spec/resources/requests/storage
+        value: 1Gi
+
+images:
+  - name: medilink-backend
+    newName: medilink-backend
+    newTag: local
+  - name: medilink-frontend
+    newName: medilink-frontend
+    newTag: local

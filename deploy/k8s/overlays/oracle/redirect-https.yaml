@@ -1,0 +1,9 @@
+# Traefik (bundled with k3s) middleware: send plain-HTTP visitors to HTTPS.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-https
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true
