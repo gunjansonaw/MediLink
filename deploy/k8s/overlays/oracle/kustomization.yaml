@@ -1,0 +1,71 @@
+# Production-ish overlay for k3s on an Oracle Cloud "Always Free" Ampere VM
+# (or any single-node k3s). TLS via cert-manager + Let's Encrypt, ingress via
+# k3s' bundled Traefik, images from GitHub Container Registry.
+#
+#   cp params.env.example params.env     # set HOST (e.g. medilink.<ip>.sslip.io)
+#   cp secrets.env.example secrets.env   # set SECRET_KEY, DB_PASSWORD, ANTHROPIC_API_KEY
+#   kubectl apply -k deploy/k8s/overlays/oracle
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: medilink
+
+resources:
+  - ../../base
+  - redirect-https.yaml
+
+secretGenerator:
+  - name: medilink-secrets
+    envs: [secrets.env]
+
+# Deployment parameters; not emitted into the cluster (local-config)
+configMapGenerator:
+  - name: medilink-params
+    envs: [params.env]
+    options:
+      disableNameSuffixHash: true
+      annotations:
+        config.kubernetes.io/local-config: "true"
+
+patches:
+  - target: {kind: Ingress, name: medilink}
+    patch: |-
+      - op: add
+        path: /spec/ingressClassName
+        value: traefik
+      - op: add
+        path: /metadata/annotations
+        value:
+          cert-manager.io/cluster-issuer: letsencrypt-prod
+          traefik.ingress.kubernetes.io/router.middlewares: medilink-redirect-https@kubernetescrd
+      - op: add
+        path: /spec/tls
+        value:
+          - hosts: [medilink.example.com]
+            secretName: medilink-tls
+  - target: {kind: ConfigMap, name: medilink-config}
+    patch: |-
+      - op: replace
+        path: /data/SECURE_HSTS_SECONDS
+        value: "31536000"
+
+# Copy HOST from params.env into the ingress and Django's allow-lists
+replacements:
+  - source: {kind: ConfigMap, name: medilink-params, fieldPath: data.HOST}
+    targets:
+      - select: {kind: Ingress, name: medilink}
+        fieldPaths: [spec.rules.0.host, spec.tls.0.hosts.0]
+      - select: {kind: ConfigMap, name: medilink-config}
+        fieldPaths: [data.ALLOWED_HOSTS]
+        options: {delimiter: ",", index: 0}
+      - select: {kind: ConfigMap, name: medilink-config}
+        fieldPaths: [data.CSRF_TRUSTED_ORIGINS, data.CORS_ALLOWED_ORIGINS]
+        options: {delimiter: "//", index: 1}
+
+images:
+  - name: medilink-backend
+    newName: ghcr.io/gunjansonaw/medilink-backend
+    newTag: latest
+  - name: medilink-frontend
+    newName: ghcr.io/gunjansonaw/medilink-frontend
+    newTag: latest

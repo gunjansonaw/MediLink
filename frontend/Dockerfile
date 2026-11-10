@@ -5,40 +5,29 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Copy package manifests
 COPY package*.json ./
+# Reproducible install from the lockfile
+RUN npm ci --legacy-peer-deps --no-audit --no-fund
 
-# Install dependencies (using legacy-peer-deps for compatibility)
-RUN npm install --legacy-peer-deps
-
-# Copy application source code
 COPY . ./
 
-# Build arguments for dynamic API URL configuration
 ARG REACT_APP_API_URL=/api
 ENV REACT_APP_API_URL=$REACT_APP_API_URL \
     NODE_ENV=production \
-    CI=false
+    CI=false \
+    GENERATE_SOURCEMAP=false
 
-# Compile production build
 RUN npm run build
 
 # -----------------------------------------------------------
-# Stage 2: Serve React Static Files with High-Performance Nginx
+# Stage 2: Serve with unprivileged Nginx (runs as non-root on :8080)
 # -----------------------------------------------------------
-FROM nginx:alpine
+FROM nginxinc/nginx-unprivileged:1.27-alpine
 
-# Remove default nginx static assets
-RUN rm -rf /usr/share/nginx/html/*
-
-# Copy build artifacts from builder stage
 COPY --from=builder /app/build /usr/share/nginx/html
+# The image renders /etc/nginx/templates/*.template with envsubst at startup
+COPY nginx.conf /etc/nginx/templates/default.conf.template
 
-# Copy custom Nginx configuration
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+ENV BACKEND_UPSTREAM=http://backend:8000
 
-# Expose HTTP port
-EXPOSE 80
-
-# Run Nginx in the foreground
-CMD ["nginx", "-g", "daemon off;"]
+EXPOSE 8080
