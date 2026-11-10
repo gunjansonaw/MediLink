@@ -1,0 +1,19 @@
+# Single public entry point: everything goes to the frontend nginx, which serves
+# the SPA and proxies /api, /admin and /django-static to the backend Service.
+# Same-origin means the HttpOnly auth cookies and CSRF need no cross-site setup.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: medilink
+  labels: {app.kubernetes.io/part-of: medilink}
+spec:
+  rules:
+    - host: medilink.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port: {name: http}
