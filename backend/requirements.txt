@@ -11,6 +11,9 @@ whitenoise==6.6.0
 celery==5.3.4
 redis==5.0.1
 django-filter==23.3
-drf-yasg==1.21.7
+# 1.21.7 imported pkg_resources, which current setuptools no longer ships
+drf-yasg==1.21.10
 setuptools>=65.5.0
 dj-database-url==2.1.0
+# Claude API SDK (AI agent features; optional at runtime — features fall back to rules without a key)
+anthropic>=2.7.0,<3

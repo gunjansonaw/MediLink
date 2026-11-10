@@ -22,9 +22,23 @@ class Appointment(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
+    ACTIVE_STATUSES = ('scheduled', 'confirmed')
+
     class Meta:
         ordering = ['-appointment_date', '-appointment_time']
-        unique_together = ['doctor', 'appointment_date', 'appointment_time']
+        # Only *active* bookings occupy a slot. The old unconditional
+        # unique_together made a cancelled slot impossible to re-book (500).
+        constraints = [
+            models.UniqueConstraint(
+                fields=['doctor', 'appointment_date', 'appointment_time'],
+                condition=models.Q(status__in=['scheduled', 'confirmed']),
+                name='unique_active_doctor_slot',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['doctor', 'appointment_date']),
+            models.Index(fields=['patient', 'appointment_date']),
+        ]
     
     def __str__(self):
         return f"{self.patient.get_full_name()} - Dr. {self.doctor.get_full_name()} on {self.appointment_date}"
