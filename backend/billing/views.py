@@ -1,16 +1,38 @@
-from rest_framework import viewsets, permissions, status
-from rest_framework.decorators import action
-from rest_framework.response import Response
+import html
+from datetime import date
+from decimal import Decimal
+
+from django.db import transaction
+from django.db.models import Sum
 from django.http import HttpResponse
 from django.utils import timezone
-from django.db.models import Sum, Count, Q
-from datetime import timedelta
+from rest_framework import permissions, serializers, status, viewsets
+from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
+from rest_framework.response import Response
+
+from users.permissions import IsAdminUser
 from .models import Invoice, InvoiceItem, Payment, InsuranceClaim
 from .serializers import (
-    InvoiceSerializer, InvoiceItemSerializer, 
+    InvoiceSerializer, InvoiceItemSerializer,
     PaymentSerializer, InsuranceClaimSerializer
 )
-from users.permissions import IsAdminUser
+
+
+def _month_starts(today, count):
+    """First day of the current month and the (count-1) months before it, oldest first."""
+    y, m = today.year, today.month
+    out = []
+    for _ in range(count):
+        out.append(date(y, m, 1))
+        m -= 1
+        if m == 0:
+            y, m = y - 1, 12
+    return list(reversed(out))
+
+
+def _next_month(d):
+    return date(d.year + (d.month // 12), d.month % 12 + 1, 1)
 
 
 class InvoiceViewSet(viewsets.ModelViewSet):
@@ -20,7 +42,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
     filterset_fields = ['patient', 'status', 'invoice_date']
     search_fields = ['invoice_number', 'patient__first_name', 'patient__last_name']
     ordering_fields = ['invoice_date', 'due_date', 'total']
-    
+
     def get_queryset(self):
         user = self.request.user
         base_qs = Invoice.objects.select_related(
@@ -28,38 +50,83 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         ).prefetch_related('items', 'payments')
 
         if user.role == 'admin':
-            return base_qs.all()
+            qs = base_qs.all()
         elif user.role == 'patient':
-            return base_qs.filter(patient=user)
+            qs = base_qs.filter(patient=user)
         elif user.role == 'doctor':
-            return base_qs.filter(appointment__doctor=user)
-        return Invoice.objects.none()
-    
+            qs = base_qs.filter(appointment__doctor=user)
+        else:
+            return Invoice.objects.none()
+
+        # ?status=pending,overdue  (comma-separated convenience filter)
+        status_param = self.request.query_params.get('status_in')
+        if status_param:
+            qs = qs.filter(status__in=[s.strip() for s in status_param.split(',') if s.strip()])
+        return qs
+
     def get_permissions(self):
         if self.action in ['update', 'partial_update', 'destroy']:
             return [IsAdminUser()]
         return [permissions.IsAuthenticated()]
-    
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        if user.role == 'patient':
+            raise PermissionDenied('Patients cannot create invoices.')
+        if user.role == 'doctor':
+            appointment = serializer.validated_data.get('appointment')
+            if not appointment or appointment.doctor_id != user.id:
+                raise PermissionDenied('Doctors can only invoice their own appointments.')
+        invoice = serializer.save()
+        invoice.sync_payment_status()
+
+    def perform_update(self, serializer):
+        invoice = serializer.save()
+        invoice.sync_payment_status()
+
     @action(detail=True, methods=['post'])
     def mark_paid(self, request, pk=None):
+        """Settle the remaining balance with an offline payment record."""
         if request.user.role != 'admin':
             return Response(
                 {'error': 'Only admins can mark invoices as paid'},
                 status=status.HTTP_403_FORBIDDEN
             )
-        
-        invoice = self.get_object()
-        invoice.status = 'paid'
-        invoice.save()
+
+        with transaction.atomic():
+            invoice = Invoice.objects.select_for_update().get(pk=self.get_object().pk)
+            if invoice.status == 'cancelled':
+                return Response({'error': 'Cancelled invoices cannot be paid'}, status=status.HTTP_400_BAD_REQUEST)
+            balance = invoice.remaining_balance
+            if balance > 0:
+                Payment.objects.create(
+                    invoice=invoice, amount=balance,
+                    payment_method=request.data.get('payment_method', 'cash'),
+                    notes=f'Marked as paid by {request.user.get_username()}',
+                )
+            invoice.sync_payment_status()
         return Response({'status': 'Invoice marked as paid'})
+
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, pk=None):
+        if request.user.role != 'admin':
+            return Response({'error': 'Only admins can cancel invoices'}, status=status.HTTP_403_FORBIDDEN)
+        invoice = self.get_object()
+        if invoice.total_paid > 0:
+            return Response({'error': 'Invoices with payments cannot be cancelled; refund first'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        invoice.status = 'cancelled'
+        invoice.save(update_fields=['status', 'updated_at'])
+        return Response({'status': 'Invoice cancelled'})
 
     @action(detail=True, methods=['get'])
     def download_pdf(self, request, pk=None):
         invoice = self.get_object()
-        
+        e = html.escape
+
         # Format HTML invoice document ready for print / save as PDF
         items_html = "".join([
-            f"<tr><td style='padding:8px;border-bottom:1px solid #eee;'>{item.description}</td>"
+            f"<tr><td style='padding:8px;border-bottom:1px solid #eee;'>{e(item.description)}</td>"
             f"<td style='padding:8px;border-bottom:1px solid #eee;text-align:center;'>{item.quantity}</td>"
             f"<td style='padding:8px;border-bottom:1px solid #eee;text-align:right;'>${float(item.unit_price):.2f}</td>"
             f"<td style='padding:8px;border-bottom:1px solid #eee;text-align:right;'>${float(item.total):.2f}</td></tr>"
@@ -70,7 +137,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Invoice {invoice.invoice_number} - MediLink</title>
+    <title>Invoice {e(invoice.invoice_number)} - MediLink</title>
     <style>
         body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #333; margin: 40px; background: #fff; }}
         .header {{ display: flex; justify-content: space-between; border-bottom: 2px solid #1890ff; padding-bottom: 20px; }}
@@ -93,19 +160,19 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         </div>
         <div style="text-align: right;">
             <h2 style="margin: 0; color: #333;">INVOICE</h2>
-            <p style="margin: 4px 0;"><strong>Invoice #:</strong> {invoice.invoice_number}</p>
+            <p style="margin: 4px 0;"><strong>Invoice #:</strong> {e(invoice.invoice_number)}</p>
             <p style="margin: 4px 0;"><strong>Date:</strong> {invoice.invoice_date}</p>
             <p style="margin: 4px 0;"><strong>Due Date:</strong> {invoice.due_date}</p>
-            <p style="margin: 4px 0;"><strong>Status:</strong> <span class="badge paid">{invoice.status}</span></p>
+            <p style="margin: 4px 0;"><strong>Status:</strong> <span class="badge paid">{e(invoice.status)}</span></p>
         </div>
     </div>
 
     <div style="margin-top: 30px; display: flex; justify-content: space-between;">
         <div>
             <strong>Billed To:</strong><br>
-            {invoice.patient.get_full_name()}<br>
-            Email: {invoice.patient.email}<br>
-            Phone: {invoice.patient.phone or 'N/A'}
+            {e(invoice.patient.get_full_name())}<br>
+            Email: {e(invoice.patient.email)}<br>
+            Phone: {e(invoice.patient.phone or 'N/A')}
         </div>
         <div>
             <strong>Provider:</strong><br>
@@ -143,8 +210,9 @@ class InvoiceViewSet(viewsets.ModelViewSet):
     </div>
 </body>
 </html>"""
-        response = HttpResponse(html_content, content_type='text/html')
-        response['Content-Disposition'] = f'inline; filename="invoice_{invoice.invoice_number}.html"'
+        response = HttpResponse(html_content, content_type='text/html; charset=utf-8')
+        response['Content-Security-Policy'] = "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"
+        response['Content-Disposition'] = f'inline; filename="invoice_{e(invoice.invoice_number)}.html"'
         return response
     
     @action(detail=False, methods=['get'])
@@ -154,35 +222,27 @@ class InvoiceViewSet(viewsets.ModelViewSet):
                 {'error': 'Permission denied'},
                 status=status.HTTP_403_FORBIDDEN
             )
-        
+
         queryset = self.get_queryset()
-        
-        total_revenue = queryset.filter(status='paid').aggregate(
-            Sum('total')
-        )['total__sum'] or 0
-        
-        pending_amount = queryset.filter(status__in=['pending', 'partially_paid']).aggregate(
-            Sum('total')
-        )['total__sum'] or 0
-        
-        # Monthly revenue for last 6 months
+        payments = Payment.objects.filter(invoice__in=queryset)
+
+        # Revenue = money actually collected (includes partial payments)
+        total_revenue = payments.aggregate(s=Sum('amount'))['s'] or Decimal('0')
+
+        open_invoices = queryset.filter(status__in=['pending', 'partially_paid', 'overdue'])
+        open_total = open_invoices.aggregate(s=Sum('total'))['s'] or Decimal('0')
+        open_paid = payments.filter(invoice__in=open_invoices).aggregate(s=Sum('amount'))['s'] or Decimal('0')
+        pending_amount = max(Decimal('0'), open_total - open_paid)
+
+        # Monthly collected revenue for the last 6 calendar months
         monthly_revenue = []
-        today = timezone.now().date()
-        for i in range(6):
-            month_start = (today.replace(day=1) - timedelta(days=i*30)).replace(day=1)
-            next_month = (month_start + timedelta(days=32)).replace(day=1)
-            
-            revenue = queryset.filter(
-                invoice_date__gte=month_start,
-                invoice_date__lt=next_month,
-                status='paid'
-            ).aggregate(Sum('total'))['total__sum'] or 0
-            
-            monthly_revenue.insert(0, {
-                'month': month_start.strftime('%B %Y'),
-                'revenue': float(revenue)
-            })
-        
+        for month_start in _month_starts(timezone.localdate(), 6):
+            revenue = payments.filter(
+                payment_date__date__gte=month_start,
+                payment_date__date__lt=_next_month(month_start),
+            ).aggregate(s=Sum('amount'))['s'] or 0
+            monthly_revenue.append({'month': month_start.strftime('%B %Y'), 'revenue': float(revenue)})
+
         stats = {
             'total_invoices': queryset.count(),
             'total_revenue': float(total_revenue),
@@ -193,7 +253,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
             'overdue_invoices': queryset.filter(status='overdue').count(),
             'monthly_revenue': monthly_revenue,
         }
-        
+
         return Response(stats)
 
 
@@ -202,11 +262,39 @@ class InvoiceItemViewSet(viewsets.ModelViewSet):
     serializer_class = InvoiceItemSerializer
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ['invoice']
-    
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = InvoiceItem.objects.select_related('invoice').order_by('id')
+        if user.role == 'admin':
+            return qs
+        if user.role == 'patient':
+            return qs.filter(invoice__patient=user)
+        if user.role == 'doctor':
+            return qs.filter(invoice__appointment__doctor=user)
+        return qs.none()
+
     def get_permissions(self):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
             return [IsAdminUser()]
         return [permissions.IsAuthenticated()]
+
+    # Keep invoice totals consistent with their line items
+    def perform_create(self, serializer):
+        item = serializer.save()
+        item.invoice.recalculate_from_items()
+        item.invoice.sync_payment_status()
+
+    def perform_update(self, serializer):
+        item = serializer.save()
+        item.invoice.recalculate_from_items()
+        item.invoice.sync_payment_status()
+
+    def perform_destroy(self, instance):
+        invoice = instance.invoice
+        instance.delete()
+        invoice.recalculate_from_items()
+        invoice.sync_payment_status()
 
 
 class PaymentViewSet(viewsets.ModelViewSet):
@@ -215,7 +303,7 @@ class PaymentViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ['invoice', 'payment_method']
     ordering_fields = ['payment_date', 'amount']
-    
+
     def get_queryset(self):
         user = self.request.user
         base_qs = Payment.objects.select_related('invoice', 'invoice__patient')
@@ -224,23 +312,41 @@ class PaymentViewSet(viewsets.ModelViewSet):
         elif user.role == 'patient':
             return base_qs.filter(invoice__patient=user)
         return Payment.objects.none()
-    
+
     def get_permissions(self):
-        if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [permissions.IsAuthenticated()]
+        # Payments are a financial ledger: only admins may edit or delete them
+        if self.action in ['update', 'partial_update', 'destroy']:
+            return [IsAdminUser()]
         return [permissions.IsAuthenticated()]
-    
+
     def perform_create(self, serializer):
-        invoice = serializer.validated_data.get('invoice')
         user = self.request.user
+        if user.role not in ['patient', 'admin']:
+            raise PermissionDenied('Only patients or admins can record payments.')
 
-        if user.role == 'patient' and invoice.patient != user:
-            from rest_framework.exceptions import PermissionDenied
-            raise PermissionDenied('Patients can only pay their own invoices')
+        with transaction.atomic():
+            # Lock the invoice row so concurrent payments can't overpay it
+            invoice = Invoice.objects.select_for_update().get(pk=serializer.validated_data['invoice'].pk)
+            if user.role == 'patient' and invoice.patient_id != user.id:
+                raise PermissionDenied('Patients can only pay their own invoices')
+            if invoice.status in ['cancelled', 'paid']:
+                raise serializers.ValidationError({'detail': f'This invoice is {invoice.status} and cannot accept payments.'})
+            amount = serializer.validated_data['amount']
+            balance = invoice.remaining_balance
+            if amount > balance:
+                raise serializers.ValidationError(
+                    {'detail': f'Payment amount exceeds the remaining balance of ${balance:.2f}.'}
+                )
+            serializer.save(invoice=invoice)
+            invoice.sync_payment_status()
 
+    def perform_update(self, serializer):
         payment = serializer.save()
+        payment.invoice.sync_payment_status()
 
-        # Update invoice payment status automatically via sync_payment_status
+    def perform_destroy(self, instance):
+        invoice = instance.invoice
+        instance.delete()
         invoice.sync_payment_status()
 
 
@@ -251,7 +357,7 @@ class InsuranceClaimViewSet(viewsets.ModelViewSet):
     filterset_fields = ['patient', 'status', 'insurance_provider']
     search_fields = ['claim_number', 'patient__first_name', 'patient__last_name']
     ordering_fields = ['submitted_date', 'processed_date']
-    
+
     def get_queryset(self):
         user = self.request.user
         base_qs = InsuranceClaim.objects.select_related('patient', 'invoice')
@@ -260,7 +366,24 @@ class InsuranceClaimViewSet(viewsets.ModelViewSet):
         elif user.role == 'patient':
             return base_qs.filter(patient=user)
         return InsuranceClaim.objects.none()
-    
+
+    def get_permissions(self):
+        if self.action in ['update', 'partial_update', 'destroy']:
+            return [IsAdminUser()]
+        return [permissions.IsAuthenticated()]
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        invoice = serializer.validated_data['invoice']
+        if user.role == 'patient':
+            if invoice.patient_id != user.id:
+                raise PermissionDenied('You can only file claims for your own invoices.')
+            serializer.save(patient=user)
+        elif user.role == 'admin':
+            serializer.save(patient=invoice.patient)
+        else:
+            raise PermissionDenied('Only patients or admins can file insurance claims.')
+
     @action(detail=True, methods=['post'])
     def approve(self, request, pk=None):
         if request.user.role != 'admin':
@@ -268,19 +391,35 @@ class InsuranceClaimViewSet(viewsets.ModelViewSet):
                 {'error': 'Only admins can approve claims'},
                 status=status.HTTP_403_FORBIDDEN
             )
-        
+
         claim = self.get_object()
-        approved_amount = request.data.get('approved_amount')
-        
-        if not approved_amount:
-            return Response(
-                {'error': 'approved_amount is required'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
+        try:
+            approved_amount = Decimal(str(request.data.get('approved_amount')))
+        except Exception:
+            return Response({'error': 'approved_amount must be a number'}, status=status.HTTP_400_BAD_REQUEST)
+        if approved_amount <= 0 or approved_amount > claim.claim_amount:
+            return Response({'error': 'approved_amount must be > 0 and not exceed the claimed amount'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if claim.status not in ['submitted', 'under_review']:
+            return Response({'error': f'Claim is already {claim.status}'}, status=status.HTTP_400_BAD_REQUEST)
+
         claim.status = 'approved'
         claim.approved_amount = approved_amount
-        claim.processed_date = timezone.now().date()
+        claim.processed_date = timezone.localdate()
         claim.save()
-        
+
         return Response({'status': 'Claim approved'})
+
+    @action(detail=True, methods=['post'])
+    def reject(self, request, pk=None):
+        if request.user.role != 'admin':
+            return Response({'error': 'Only admins can reject claims'}, status=status.HTTP_403_FORBIDDEN)
+        claim = self.get_object()
+        if claim.status not in ['submitted', 'under_review']:
+            return Response({'error': f'Claim is already {claim.status}'}, status=status.HTTP_400_BAD_REQUEST)
+        claim.status = 'rejected'
+        claim.processed_date = timezone.localdate()
+        if request.data.get('reason'):
+            claim.notes = (claim.notes + '\n' if claim.notes else '') + f"Rejected: {request.data['reason']}"
+        claim.save()
+        return Response({'status': 'Claim rejected'})

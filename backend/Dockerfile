@@ -1,40 +1,35 @@
 # -----------------------------------------------------------
-# MediLink Backend - Production Dockerfile
-# Python 3.11 Slim with Multi-Stage Optimization
+# MediLink Backend - Production Dockerfile (multi-arch: amd64 + arm64)
 # -----------------------------------------------------------
-FROM python:3.11-slim
+FROM python:3.11-slim AS base
 
-# Prevent Python from writing .pyc files & buffer stdout/stderr
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    DEBIAN_FRONTEND=noninteractive
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
 
-# Install system dependencies (PostgreSQL client libraries, netcat for DB polling)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libpq-dev \
-    netcat-traditional \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Python dependencies
+# psycopg2-binary ships wheels for amd64 and arm64, so no compiler is needed
 COPY requirements.txt /app/
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+RUN pip install -r requirements.txt
 
-# Copy backend source code
 COPY . /app/
 
-# Make entrypoint script executable
-RUN chmod +x /app/entrypoint.sh
+# Static files are baked into the image (served by WhiteNoise)
+RUN DEBUG=True SECRET_KEY=build-only DB_ENGINE=django.db.backends.sqlite3 \
+    python manage.py collectstatic --noinput \
+ && chmod +x /app/entrypoint.sh \
+ && useradd --uid 10001 --create-home --shell /usr/sbin/nologin medilink \
+ && mkdir -p /app/media \
+ && chown -R medilink:medilink /app/media
 
-# Expose Django REST API port
+USER 10001
+
 EXPOSE 8000
 
-# Set entrypoint
-ENTRYPOINT ["/app/entrypoint.sh"]
+# 2 workers x 4 threads; long timeout because AI agent turns can take a while
+ENV GUNICORN_CMD_ARGS="--workers 2 --threads 4 --timeout 180 --access-logfile -"
 
-# Default command: Run production Gunicorn WSGI server
-CMD ["gunicorn", "medilink.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3", "--timeout", "120"]
+ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["gunicorn", "medilink.wsgi:application", "--bind", "0.0.0.0:8000"]

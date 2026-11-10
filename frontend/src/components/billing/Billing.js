@@ -38,9 +38,7 @@ function Billing() {
       const response = await api.get('/billing/invoices/');
       const data = response.data.results || response.data;
       setInvoices(data);
-      if (data.length > 0 && !selectedInvoice) {
-        setSelectedInvoice(data[0]);
-      }
+      setSelectedInvoice((current) => data.find((i) => i.id === current?.id) || data[0] || null);
     } catch (error) {
       message.error('Failed to load invoices');
     } finally {
@@ -81,12 +79,11 @@ function Billing() {
       message.success(`Payment of $${amountToPay.toFixed(2)} processed successfully`);
       setIsPaymentModalVisible(false);
       
-      // Refresh list & current item
+      // Refresh list (keeps the current invoice selected with fresh balances)
       await fetchInvoices();
-      const resp = await api.get(`/billing/invoices/${selectedInvoice.id}/`);
-      setSelectedInvoice(resp.data);
     } catch (error) {
-      const err = error.response?.data?.detail || 'Payment failed. Please try again.';
+      const data = error.response?.data;
+      const err = data?.detail || (Array.isArray(data?.amount) ? data.amount[0] : null) || 'Payment failed. Please try again.';
       message.error(err);
     } finally {
       setPaying(false);
@@ -208,7 +205,7 @@ function Billing() {
               title={`Invoice #${selectedInvoice.invoice_number}`}
               extra={
                 <Space>
-                  {selectedInvoice.status !== 'paid' && (
+                  {!['paid', 'cancelled'].includes(selectedInvoice.status) && amountDue > 0 && (
                     <Button
                       type="primary"
                       loading={paying}
