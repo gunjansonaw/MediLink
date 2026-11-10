@@ -35,9 +35,13 @@ SECRET_KEY = config('SECRET_KEY', default='django-insecure-your-secret-key-chang
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config('DEBUG', default=True, cast=bool)
 
+if not DEBUG and SECRET_KEY.startswith('django-insecure'):
+    raise RuntimeError('SECRET_KEY must be set to a strong random value when DEBUG=False')
+
+# NOTE: no wildcard by default — '*' disables Host header validation.
 _allowed_hosts = config(
-    'ALLOWED_HOSTS', 
-    default='localhost,127.0.0.1,testserver,backend,web,frontend,*', 
+    'ALLOWED_HOSTS',
+    default='localhost,127.0.0.1,testserver,backend,web,frontend',
     cast=lambda v: [s.strip() for s in v.split(',') if s.strip()]
 )
 # Automatically support Railway and Render dynamic hostnames
@@ -91,6 +95,7 @@ INSTALLED_APPS = [
     'appointments',
     'medical_records',
     'billing',
+    'ai_agents',
 ]
 
 MIDDLEWARE = [
@@ -197,7 +202,8 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
 
-STATIC_URL = 'static/'
+# Distinct prefix so Django admin assets never collide with the React build's /static/
+STATIC_URL = 'django-static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 # Django 4.2+ uses STORAGES dict; whitenoise compression for production
 STORAGES = {
@@ -236,6 +242,11 @@ REST_FRAMEWORK = {
     ),
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 10,
+    'DEFAULT_THROTTLE_RATES': {
+        # Per-user limit on LLM-backed endpoints (cost + abuse protection)
+        'ai': config('AI_RATE_LIMIT', default='30/hour'),
+        'login': config('LOGIN_RATE_LIMIT', default='10/min'),
+    },
 }
 
 # JWT Configuration
@@ -258,7 +269,7 @@ JWT_AUTH_REFRESH_COOKIE = 'medilink_refresh'
 JWT_AUTH_COOKIE_SECURE  = not DEBUG
 # 'Lax' allows cookies on same-site navigations; use 'None' for cross-site
 # (requires Secure=True).  'Strict' is the most locked down.
-JWT_AUTH_COOKIE_SAMESITE = 'Lax'
+JWT_AUTH_COOKIE_SAMESITE = config('JWT_AUTH_COOKIE_SAMESITE', default='Lax')
 # Set to your domain in production if needed (leave None for localhost)
 JWT_AUTH_COOKIE_DOMAIN  = config('COOKIE_DOMAIN', default=None)
 
@@ -266,7 +277,7 @@ JWT_AUTH_COOKIE_DOMAIN  = config('COOKIE_DOMAIN', default=None)
 CORS_ALLOWED_ORIGINS = config(
     'CORS_ALLOWED_ORIGINS',
     default='http://localhost:3000,http://127.0.0.1:3000',
-    cast=lambda v: [s.strip() for s in v.split(',')]
+    cast=lambda v: [s.strip() for s in v.split(',') if s.strip()]
 )
 CORS_ALLOW_CREDENTIALS = True
 
@@ -274,7 +285,7 @@ CORS_ALLOW_CREDENTIALS = True
 # The csrftoken cookie must NOT be HttpOnly so our JS can read it and send it
 # as the X-CSRFToken request header (standard Django CSRF protection for SPAs).
 CSRF_COOKIE_HTTPONLY = False
-CSRF_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_SAMESITE = JWT_AUTH_COOKIE_SAMESITE
 CSRF_COOKIE_SECURE   = not DEBUG   # True in production (HTTPS)
 
 # Session cookie (if Django sessions are used alongside JWT)
@@ -294,5 +305,59 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'billing.tasks.check_overdue_invoices',
         'schedule': 3600.0,
     },
+    'appointment-reminders-hourly': {
+        'task': 'billing.tasks.send_upcoming_appointment_reminders',
+        'schedule': 3600.0,
+    },
+    'ai-pre-visit-briefs-hourly': {
+        'task': 'ai_agents.tasks.generate_upcoming_briefs',
+        'schedule': 3600.0,
+    },
+    'ai-collections-daily': {
+        'task': 'ai_agents.tasks.run_collections_agent',
+        'schedule': 86400.0,
+    },
+    'ai-care-followups-daily': {
+        'task': 'ai_agents.tasks.run_care_followup_agent',
+        'schedule': 86400.0,
+    },
+}
+# Run tasks inline when no broker is configured (e.g. single-container free hosting)
+CELERY_TASK_ALWAYS_EAGER = config('CELERY_TASK_ALWAYS_EAGER', default=False, cast=bool)
+
+# Production hardening behind an HTTPS ingress / load balancer
+if not DEBUG:
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    X_FRAME_OPTIONS = 'DENY'
+    SECURE_SSL_REDIRECT = config('SECURE_SSL_REDIRECT', default=False, cast=bool)
+    SECURE_HSTS_SECONDS = config('SECURE_HSTS_SECONDS', default=0, cast=int)
+
+# Cookies must be Secure over HTTPS; allow override for plain-HTTP clusters (e.g. local kind)
+JWT_AUTH_COOKIE_SECURE = config('COOKIE_SECURE', default=not DEBUG, cast=bool)
+CSRF_COOKIE_SECURE = JWT_AUTH_COOKIE_SECURE
+SESSION_COOKIE_SECURE = JWT_AUTH_COOKIE_SECURE
+
+# ── AI agents (Claude API) ───────────────────────────────────────────────────
+# The anthropic SDK reads ANTHROPIC_API_KEY from the environment. When it's
+# unset, every AI feature degrades to deterministic rule-based behaviour.
+AI_ENABLED = config('AI_ENABLED', default=True, cast=bool)
+AI_MODEL = config('AI_MODEL', default='claude-opus-5-5')
+AI_EFFORT = config('AI_EFFORT', default='medium')
+AI_MAX_AGENT_STEPS = config('AI_MAX_AGENT_STEPS', default=8, cast=int)
+AI_REQUEST_TIMEOUT = config('AI_REQUEST_TIMEOUT', default=90, cast=float)
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {'console': {'class': 'logging.StreamHandler'}},
+    'root': {'handlers': ['console'], 'level': config('LOG_LEVEL', default='INFO')},
 }
 
+
+# ── Test mode ────────────────────────────────────────────────────────────────
+import sys as _sys
+if 'test' in _sys.argv:
+    CELERY_TASK_ALWAYS_EAGER = True
+    REST_FRAMEWORK['DEFAULT_THROTTLE_RATES'] = {'ai': '1000/min', 'login': '1000/min'}
+    PASSWORD_HASHERS = ['django.contrib.auth.hashers.MD5PasswordHasher']

@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Row, Col, Card, Statistic, List, Tag, Typography, Space, Spin, Empty,
+  Row, Col, Card, Statistic, List, Tag, Typography, Space, Spin, Empty, Button,
 } from 'antd';
 import {
-  CalendarOutlined, CheckCircleOutlined, ClockCircleOutlined, TeamOutlined,
+  CalendarOutlined, CheckCircleOutlined, ClockCircleOutlined, TeamOutlined, FileSearchOutlined,
 } from '@ant-design/icons';
+import BriefModal from '../ai/BriefModal';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
@@ -26,6 +27,7 @@ function DoctorDashboard() {
   const [stats, setStats] = useState({ total: 0, today: 0, scheduled: 0, completed: 0 });
   const [upcomingAppointments, setUpcomingAppointments] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [briefFor, setBriefFor] = useState(null);
 
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -138,7 +140,12 @@ function DoctorDashboard() {
                 renderItem={(apt) => (
                   <List.Item
                     key={apt.id}
-                    extra={<Tag color={statusColor(apt.status)}>{apt.status}</Tag>}
+                    extra={
+                      <Space>
+                        <Tag color={statusColor(apt.status)}>{apt.status}</Tag>
+                        <Button size="small" icon={<FileSearchOutlined />} onClick={() => setBriefFor(apt)}>Brief</Button>
+                      </Space>
+                    }
                   >
                     <List.Item.Meta
                       title={`${apt.patient_details?.first_name || ''} ${apt.patient_details?.last_name || ''}`}
@@ -151,6 +158,7 @@ function DoctorDashboard() {
           </Card>
         </Col>
       </Row>
+      <BriefModal appointment={briefFor} open={!!briefFor} onClose={() => setBriefFor(null)} />
     </div>
   );
 }

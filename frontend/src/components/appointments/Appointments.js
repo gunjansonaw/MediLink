@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Table, Button, Modal, Form, Select, DatePicker, TimePicker,
+  Table, Button, Modal, Form, Select, DatePicker,
   Input, Tag, Space, Typography, message, Card,
 } from 'antd';
-import { PlusOutlined, CheckOutlined, CloseOutlined, CalendarOutlined } from '@ant-design/icons';
+import {
+  PlusOutlined, CheckOutlined, CloseOutlined, CalendarOutlined, FileSearchOutlined, StopOutlined,
+} from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
+import BriefModal from '../ai/BriefModal';
 
 const { Title } = Typography;
 const { Option } = Select;
@@ -17,6 +20,7 @@ const statusColor = (status) => {
     case 'completed': return 'purple';
     case 'confirmed': return 'green';
     case 'cancelled': return 'red';
+    case 'no_show': return 'volcano';
     default: return 'blue';
   }
 };
@@ -28,7 +32,27 @@ function Appointments() {
   const [showModal, setShowModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [briefFor, setBriefFor] = useState(null);
+  const [slots, setSlots] = useState([]);
+  const [slotsLoading, setSlotsLoading] = useState(false);
   const [form] = Form.useForm();
+  const selectedDoctor = Form.useWatch('doctor', form);
+  const selectedDate = Form.useWatch('appointment_date', form);
+
+  // Load real free slots whenever doctor + date are chosen
+  useEffect(() => {
+    if (!selectedDoctor || !selectedDate) {
+      setSlots([]);
+      return;
+    }
+    const day = dayjs(selectedDate).format('YYYY-MM-DD');
+    setSlotsLoading(true);
+    form.setFieldValue('appointment_time', undefined);
+    api.get('/appointments/appointments/available_slots/', { params: { doctor: selectedDoctor, start: day, end: day } })
+      .then((r) => setSlots(r.data.slots.map((sl) => sl.time)))
+      .catch(() => setSlots([]))
+      .finally(() => setSlotsLoading(false));
+  }, [selectedDoctor, selectedDate]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     fetchAppointments();
@@ -63,7 +87,7 @@ function Appointments() {
       await api.post('/appointments/appointments/', {
         doctor: values.doctor,
         appointment_date: dayjs(values.appointment_date).format('YYYY-MM-DD'),
-        appointment_time: dayjs(values.appointment_time).format('HH:mm'),
+        appointment_time: values.appointment_time,
         reason: values.reason,
       });
       message.success('Appointment booked successfully');
@@ -93,6 +117,16 @@ function Appointments() {
       fetchAppointments();
     } catch (error) {
       message.error('Failed to confirm appointment');
+    }
+  };
+
+  const handleStatus = async (id, verb, label) => {
+    try {
+      await api.post(`/appointments/appointments/${id}/${verb}/`);
+      message.success(label);
+      fetchAppointments();
+    } catch (error) {
+      message.error(error.response?.data?.error || 'Could not update appointment');
     }
   };
 
@@ -158,8 +192,8 @@ function Appointments() {
       title: 'Actions',
       key: 'actions',
       render: (_, record) => (
-        <Space>
-          {user.role === 'doctor' && record.status === 'scheduled' && (
+        <Space wrap>
+          {user.role !== 'patient' && record.status === 'scheduled' && (
             <Button
               type="primary"
               size="small"
@@ -169,7 +203,22 @@ function Appointments() {
               Confirm
             </Button>
           )}
-          {record.status !== 'cancelled' && record.status !== 'completed' && (
+          {user.role !== 'patient' && ['scheduled', 'confirmed'].includes(record.status) && (
+            <>
+              <Button size="small" onClick={() => handleStatus(record.id, 'complete', 'Appointment completed')}>
+                Complete
+              </Button>
+              <Button size="small" icon={<StopOutlined />} onClick={() => handleStatus(record.id, 'no_show', 'Marked as no-show')}>
+                No-show
+              </Button>
+            </>
+          )}
+          {user.role === 'doctor' && ['scheduled', 'confirmed'].includes(record.status) && (
+            <Button size="small" icon={<FileSearchOutlined />} onClick={() => setBriefFor(record)}>
+              Brief
+            </Button>
+          )}
+          {['scheduled', 'confirmed'].includes(record.status) && (
             <Button
               danger
               size="small"
@@ -207,6 +256,8 @@ function Appointments() {
           scroll={{ x: 600 }}
         />
       </Card>
+
+      <BriefModal appointment={briefFor} open={!!briefFor} onClose={() => setBriefFor(null)} />
 
       {/* Book Appointment Modal */}
       <Modal
@@ -250,10 +301,16 @@ function Appointments() {
 
           <Form.Item
             name="appointment_time"
-            label="Time"
-            rules={[{ required: true, message: 'Please select a time' }]}
+            label="Available time"
+            rules={[{ required: true, message: 'Please select a time slot' }]}
           >
-            <TimePicker style={{ width: '100%' }} format="HH:mm" minuteStep={15} />
+            <Select
+              placeholder={!selectedDoctor || !selectedDate ? 'Choose a doctor and date first' : 'Pick a free slot'}
+              loading={slotsLoading}
+              disabled={!selectedDoctor || !selectedDate}
+              notFoundContent={slotsLoading ? 'Loading…' : 'No free slots on this day'}
+              options={slots.map((t) => ({ value: t, label: t }))}
+            />
           </Form.Item>
 
           <Form.Item
