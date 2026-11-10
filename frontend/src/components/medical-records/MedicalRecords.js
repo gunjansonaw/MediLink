@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import {
   List, Card, Descriptions, Table, Tag, Typography, Space, Spin,
-  Empty, Row, Col, Button, Modal, Form, Input, Select, message,
+  Empty, Row, Col, Button, Modal, Form, Input, Select, message, Tooltip,
 } from 'antd';
-import { FileTextOutlined, PlusOutlined, MedicineBoxOutlined } from '@ant-design/icons';
+import {
+  FileTextOutlined, PlusOutlined, MedicineBoxOutlined, SafetyOutlined, BulbOutlined,
+} from '@ant-design/icons';
 import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
+import { SafetyFindings } from '../ai/ToolResultCard';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
@@ -14,10 +17,21 @@ const { Option } = Select;
 const statusColor = (status) =>
   status === 'completed' ? 'green' : 'orange';
 
+const SEVERITY_COLOR = { critical: 'red', warning: 'orange', info: 'blue' };
+
+const fieldErrors = (data) => {
+  if (!data) return null;
+  if (typeof data === 'string') return data;
+  if (data.detail) return data.detail;
+  return Object.entries(data).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join(' | ');
+};
+
 function MedicalRecords() {
   const { user } = useAuth();
   const [records, setRecords] = useState([]);
   const [patients, setPatients] = useState([]);
+  const [doctors, setDoctors] = useState([]);
+  const [labInsight, setLabInsight] = useState(null);
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -29,9 +43,12 @@ function MedicalRecords() {
     if (user.role === 'doctor' || user.role === 'admin') {
       fetchPatients();
     }
-  }, [user.role]);
+    if (user.role === 'admin') {
+      api.get('/users/doctors/').then((r) => setDoctors(r.data)).catch(() => {});
+    }
+  }, [user.role]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const fetchRecords = async () => {
+  const fetchRecords = async (selectId = null) => {
     try {
       const endpoint = user.role === 'patient'
         ? '/medical-records/records/my_records/'
@@ -39,9 +56,8 @@ function MedicalRecords() {
       const response = await api.get(endpoint);
       const data = response.data.results || response.data;
       setRecords(data);
-      if (data.length > 0 && !selectedRecord) {
-        setSelectedRecord(data[0]);
-      }
+      const wanted = selectId ?? selectedRecord?.id;
+      setSelectedRecord(data.find((r) => r.id === wanted) || data[0] || null);
     } catch (error) {
       message.error('Failed to load medical records');
     } finally {
@@ -51,14 +67,15 @@ function MedicalRecords() {
 
   const fetchPatients = async () => {
     try {
-      const response = await api.get('/users/?role=patient');
+      // /users/?role=... was ignored by the API and returned a paginated mix of all users
+      const response = await api.get('/users/patients/');
       setPatients(response.data.results || response.data);
     } catch (error) {
       console.error('Could not load patient list', error);
     }
   };
 
-  const handleCreateRecord = async (values) => {
+  const saveRecord = async (values) => {
     setCreating(true);
     try {
       const recordPayload = {
@@ -68,6 +85,7 @@ function MedicalRecords() {
         treatment_plan: values.treatment_plan,
         notes: values.notes || '',
       };
+      if (user.role === 'admin') recordPayload.doctor = values.doctor;
 
       const recordResp = await api.post('/medical-records/records/', recordPayload);
       const createdRecord = recordResp.data;
@@ -87,13 +105,88 @@ function MedicalRecords() {
       message.success('Medical record created successfully');
       form.resetFields();
       setIsModalOpen(false);
-      await fetchRecords();
-      setSelectedRecord(createdRecord);
+      await fetchRecords(createdRecord.id);
     } catch (error) {
-      const err = error.response?.data?.detail || 'Failed to create medical record';
-      message.error(err);
+      message.error(fieldErrors(error.response?.data) || 'Failed to create medical record');
     } finally {
       setCreating(false);
+    }
+  };
+
+  // Run the prescription safety agent BEFORE saving; require explicit override on findings.
+  const handleCreateRecord = async (values) => {
+    if (!values.medication_name) {
+      saveRecord(values);
+      return;
+    }
+    setCreating(true);
+    let check;
+    try {
+      const resp = await api.post('/ai/prescription-check/', {
+        patient: values.patient,
+        medication_name: values.medication_name,
+        dosage: values.dosage || '',
+        frequency: values.frequency || '',
+      });
+      check = resp.data;
+    } catch (error) {
+      // A patient with no prior relationship is fine to prescribe for; the post-save check still runs.
+      check = null;
+    } finally {
+      setCreating(false);
+    }
+    const serious = (check?.findings || []).filter((f) => f.severity !== 'info');
+    if (!serious.length) {
+      saveRecord(values);
+      return;
+    }
+    Modal.confirm({
+      title: <Space><SafetyOutlined style={{ color: '#ff4d4f' }} />Prescription safety check</Space>,
+      width: 640,
+      icon: null,
+      content: (
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <SafetyFindings findings={check.findings} />
+          <Text type="secondary" style={{ fontSize: 12 }}>{check.disclaimer}</Text>
+        </Space>
+      ),
+      okText: 'Prescribe anyway',
+      okButtonProps: { danger: true },
+      cancelText: 'Go back and edit',
+      onOk: () => saveRecord(values),
+    });
+  };
+
+  const acknowledgeAlert = (alert) => {
+    let note = '';
+    Modal.confirm({
+      title: 'Acknowledge safety alert',
+      content: (
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <Text>{alert.message}</Text>
+          <TextArea rows={3} placeholder={alert.severity === 'critical' ? 'Clinical justification (required)' : 'Note (optional)'}
+            onChange={(e) => { note = e.target.value; }} />
+        </Space>
+      ),
+      onOk: async () => {
+        try {
+          await api.post(`/ai/safety-alerts/${alert.id}/acknowledge/`, { note });
+          message.success('Alert acknowledged');
+          fetchRecords();
+        } catch (error) {
+          message.error(error.response?.data?.error || 'Could not acknowledge');
+          throw error;
+        }
+      },
+    });
+  };
+
+  const explainLab = async (lab) => {
+    try {
+      const resp = await api.get(`/ai/lab-insights/${lab.id}/`);
+      setLabInsight({ lab, ...resp.data });
+    } catch (error) {
+      message.error(error.response?.data?.error || 'Explanation not available');
     }
   };
 
@@ -110,6 +203,26 @@ function MedicalRecords() {
     { title: 'Dosage', dataIndex: 'dosage', key: 'dosage' },
     { title: 'Frequency', dataIndex: 'frequency', key: 'frequency' },
     { title: 'Duration', dataIndex: 'duration', key: 'duration' },
+    ...(user.role !== 'patient' ? [{
+      title: 'Safety',
+      key: 'safety',
+      render: (_, rx) => (
+        <Space wrap size={[2, 4]}>
+          {(rx.safety_alerts || []).length === 0 && <Tag color="green">OK</Tag>}
+          {(rx.safety_alerts || []).filter((a) => a.category !== 'unrecognized').map((a) => (
+            <Tooltip key={a.id} title={a.message}>
+              <Tag
+                color={a.acknowledged ? 'default' : SEVERITY_COLOR[a.severity]}
+                style={{ cursor: a.acknowledged ? 'default' : 'pointer' }}
+                onClick={() => !a.acknowledged && acknowledgeAlert(a)}
+              >
+                {a.acknowledged ? '✓ ' : ''}{a.category}
+              </Tag>
+            </Tooltip>
+          ))}
+        </Space>
+      ),
+    }] : []),
   ];
 
   const labTestColumns = [
@@ -126,6 +239,15 @@ function MedicalRecords() {
       dataIndex: 'result',
       key: 'result',
       render: (r) => r || 'Pending',
+    },
+    {
+      title: '',
+      key: 'explain',
+      render: (_, lab) => lab.status === 'completed' && (
+        <Button size="small" icon={<BulbOutlined />} onClick={() => explainLab(lab)}>
+          {user.role === 'patient' ? 'What does this mean?' : 'Patient explanation'}
+        </Button>
+      ),
     },
   ];
 
@@ -264,6 +386,29 @@ function MedicalRecords() {
         )}
       </Row>
 
+      <Modal
+        open={!!labInsight}
+        onCancel={() => setLabInsight(null)}
+        footer={null}
+        title={<Space><BulbOutlined />{labInsight?.lab?.test_name}</Space>}
+      >
+        {labInsight && (
+          <Space direction="vertical" style={{ width: '100%' }}>
+            {labInsight.abnormal_flags?.length > 0 && (
+              <Space wrap>
+                {labInsight.abnormal_flags.map((f) => (
+                  <Tag key={f.analyte} color="orange">{f.label}: {f.value} {f.unit} ({f.direction}; typical {f.range})</Tag>
+                ))}
+              </Space>
+            )}
+            <Text style={{ whiteSpace: 'pre-wrap' }}>{labInsight.patient_explanation}</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {labInsight.source === 'llm' ? 'AI-generated' : 'Automatically generated'} explanation — not a diagnosis. Your doctor will review the result.
+            </Text>
+          </Space>
+        )}
+      </Modal>
+
       {/* Doctor Create Medical Record Modal */}
       <Modal
         title="Add Clinical Medical Record"
@@ -272,7 +417,7 @@ function MedicalRecords() {
         onOk={() => form.submit()}
         confirmLoading={creating}
         width={650}
-        okText="Save Record"
+        okText="Check & Save Record"
       >
         <Form form={form} layout="vertical" onFinish={handleCreateRecord}>
           <Form.Item
@@ -280,7 +425,7 @@ function MedicalRecords() {
             label="Select Patient"
             rules={[{ required: true, message: 'Please select a patient' }]}
           >
-            <Select placeholder="Choose patient">
+            <Select placeholder="Choose patient" showSearch optionFilterProp="children">
               {patients.map((p) => (
                 <Option key={p.id} value={p.id}>
                   {p.first_name} {p.last_name} ({p.email || p.username})
@@ -288,6 +433,16 @@ function MedicalRecords() {
               ))}
             </Select>
           </Form.Item>
+
+          {user.role === 'admin' && (
+            <Form.Item name="doctor" label="Attending Doctor" rules={[{ required: true, message: 'Please select a doctor' }]}>
+              <Select placeholder="Choose doctor">
+                {doctors.map((d) => (
+                  <Option key={d.id} value={d.id}>Dr. {d.first_name} {d.last_name}</Option>
+                ))}
+              </Select>
+            </Form.Item>
+          )}
 
           <Form.Item
             name="diagnosis"

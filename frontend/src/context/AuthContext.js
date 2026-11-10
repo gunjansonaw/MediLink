@@ -1,5 +1,5 @@
 import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
-import api from '../services/api';
+import api, { csrfReady } from '../services/api';
 
 const AuthContext = createContext();
 
@@ -43,6 +43,7 @@ export const AuthProvider = ({ children }) => {
    */
   const login = async (username, password) => {
     try {
+      await csrfReady; // make sure the CSRF token exists before the first POST
       const response = await api.post('/users/login/', { username, password });
       setUser(response.data.user);
       return { success: true };
@@ -60,6 +61,7 @@ export const AuthProvider = ({ children }) => {
    */
   const register = async (userData) => {
     try {
+      await csrfReady;
       await api.post('/users/', userData);
       return { success: true };
     } catch (error) {

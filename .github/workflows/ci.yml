@@ -1,0 +1,150 @@
+name: CI / CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: medilink
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DB_HOST: localhost
+      DB_PASSWORD: postgres
+      SECRET_KEY: ci-only-secret
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r requirements.txt
+      - run: python manage.py makemigrations --check --dry-run
+      - run: python manage.py check
+      - run: python manage.py test --verbosity 2
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --legacy-peer-deps
+      - run: npm run build
+        env:
+          CI: "true"   # lint warnings fail the build
+          REACT_APP_API_URL: /api
+
+  k8s-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install kubectl + kubeconform
+        run: |
+          curl -sSLo /usr/local/bin/kubectl https://dl.k8s.io/release/v1.31.4/bin/linux/amd64/kubectl
+          chmod +x /usr/local/bin/kubectl
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz -C /usr/local/bin kubeconform
+      - name: Render and validate overlays
+        run: |
+          cp deploy/k8s/overlays/oracle/params.env.example deploy/k8s/overlays/oracle/params.env
+          cp deploy/k8s/overlays/oracle/secrets.env.example deploy/k8s/overlays/oracle/secrets.env
+          for o in local oracle; do
+            kubectl kustomize deploy/k8s/overlays/$o | kubeconform -strict -summary -kubernetes-version 1.31.0 -skip Middleware -
+          done
+
+  images:
+    # Multi-arch so the same images run on x86 and on Oracle's free Ampere (arm64) VMs
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [backend-tests, frontend-build, k8s-validate]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        component: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/medilink-${{ matrix.component }}
+          tags: |
+            type=raw,value=latest
+            type=sha,format=long,prefix=
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.component }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
+
+  deploy:
+    # Opt-in: set repository variable DEPLOY_ENABLED=true, variable MEDILINK_HOST,
+    # and secrets KUBE_CONFIG (base64 kubeconfig), DJANGO_SECRET_KEY, DB_PASSWORD,
+    # and optionally ANTHROPIC_API_KEY.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true'
+    needs: [images]
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install kubectl
+        run: |
+          curl -sSLo /usr/local/bin/kubectl https://dl.k8s.io/release/v1.31.4/bin/linux/amd64/kubectl
+          chmod +x /usr/local/bin/kubectl
+      - name: Write kubeconfig and overlay inputs
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+          DJANGO_SECRET_KEY: ${{ secrets.DJANGO_SECRET_KEY }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          MEDILINK_HOST: ${{ vars.MEDILINK_HOST }}
+        run: |
+          umask 077
+          mkdir -p ~/.kube && echo "$KUBE_CONFIG" | base64 -d > ~/.kube/config
+          o=deploy/k8s/overlays/oracle
+          echo "HOST=$MEDILINK_HOST" > $o/params.env
+          printf 'SECRET_KEY=%s\nDB_PASSWORD=%s\nANTHROPIC_API_KEY=%s\n' "$DJANGO_SECRET_KEY" "$DB_PASSWORD" "$ANTHROPIC_API_KEY" > $o/secrets.env
+      - name: Deploy this commit's images
+        run: |
+          # deploy.sh only fills in missing env files, so the ones written above are used as-is
+          KUBECONFIG=~/.kube/config IMAGE_TAG=${{ github.sha }} bash deploy/oracle/deploy.sh
