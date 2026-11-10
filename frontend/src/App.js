@@ -11,6 +11,8 @@ import Layout from './components/layout/Layout';
 import Appointments from './components/appointments/Appointments';
 import MedicalRecords from './components/medical-records/MedicalRecords';
 import Billing from './components/billing/Billing';
+import AssistantChat from './components/ai/AssistantChat';
+import AIOps from './components/ai/AIOps';
 
 function PrivateRoute({ children, allowedRoles }) {
   const { user, loading } = useAuth();
@@ -80,6 +82,9 @@ function App() {
                   <Route path="appointments" element={<Appointments />} />
                   <Route path="medical-records" element={<MedicalRecords />} />
                   <Route path="billing" element={<Billing />} />
+                  <Route path="assistant" element={<AssistantChat />} />
+                  <Route path="ai-ops" element={<AIOps />} />
+                  <Route path="*" element={<Navigate to="dashboard" replace />} />
                 </Routes>
               </Layout>
             </PrivateRoute>
@@ -93,6 +98,8 @@ function App() {
                   <Route path="dashboard" element={<DoctorDashboard />} />
                   <Route path="appointments" element={<Appointments />} />
                   <Route path="medical-records" element={<MedicalRecords />} />
+                  <Route path="assistant" element={<AssistantChat />} />
+                  <Route path="*" element={<Navigate to="dashboard" replace />} />
                 </Routes>
               </Layout>
             </PrivateRoute>
@@ -107,10 +114,14 @@ function App() {
                   <Route path="appointments" element={<Appointments />} />
                   <Route path="medical-records" element={<MedicalRecords />} />
                   <Route path="billing" element={<Billing />} />
+                  <Route path="assistant" element={<AssistantChat />} />
+                  <Route path="*" element={<Navigate to="dashboard" replace />} />
                 </Routes>
               </Layout>
             </PrivateRoute>
           } />
+
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Router>
     </AuthProvider>

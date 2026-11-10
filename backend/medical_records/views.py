@@ -1,6 +1,7 @@
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from django.http import FileResponse, Http404
 from django.utils import timezone
 from .models import MedicalRecord, Prescription, LabTest, VitalSigns
 from .serializers import (
@@ -22,7 +23,7 @@ class MedicalRecordViewSet(viewsets.ModelViewSet):
         user = self.request.user
         base_qs = MedicalRecord.objects.select_related(
             'patient', 'doctor', 'patient__patient_profile', 'doctor__doctor_profile', 'appointment'
-        ).prefetch_related('prescriptions', 'lab_tests')
+        ).prefetch_related('prescriptions__safety_alerts', 'lab_tests')
 
         if user.role == 'admin':
             return base_qs.all()
@@ -37,9 +38,16 @@ class MedicalRecordViewSet(viewsets.ModelViewSet):
             return [IsDoctorOrAdmin()]
         return [permissions.IsAuthenticated()]
     
+ 
     def perform_create(self, serializer):
         if self.request.user.role == 'doctor':
             serializer.save(doctor=self.request.user)
+        else:
+            serializer.save()
+
+    def perform_update(self, serializer):
+        if self.request.user.role == 'doctor':
+            serializer.save(doctor=self.request.user)  # cannot re-assign authorship
         else:
             serializer.save()
     
@@ -64,7 +72,9 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        base_qs = Prescription.objects.select_related('medical_record', 'medical_record__patient', 'medical_record__doctor')
+        base_qs = Prescription.objects.select_related(
+            'medical_record', 'medical_record__patient', 'medical_record__doctor'
+        ).prefetch_related('safety_alerts')
         if user.role == 'admin':
             return base_qs.all()
         elif user.role == 'doctor':
@@ -110,10 +120,23 @@ class LabTestViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
         
+        if lab_test.status == 'cancelled':
+            return Response({'error': 'A cancelled lab test cannot be completed'}, status=status.HTTP_400_BAD_REQUEST)
+        if 'result' in request.data:
+            lab_test.result = request.data.get('result') or ''
         lab_test.status = 'completed'
         lab_test.completed_date = timezone.now()
         lab_test.save()
         return Response({'status': 'Lab test completed'})
+
+    @action(detail=True, methods=['get'])
+    def download_result(self, request, pk=None):
+        """Permission-checked download (media files are not publicly served)."""
+        lab_test = self.get_object()
+        if not lab_test.result_file:
+            raise Http404('No result file attached')
+        return FileResponse(lab_test.result_file.open('rb'), as_attachment=True,
+                            filename=lab_test.result_file.name.rsplit('/', 1)[-1])
 
 
 class VitalSignsViewSet(viewsets.ModelViewSet):

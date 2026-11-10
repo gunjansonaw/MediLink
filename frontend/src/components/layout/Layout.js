@@ -6,9 +6,10 @@ import {
 import {
   DashboardOutlined, CalendarOutlined, FileTextOutlined,
   DollarOutlined, LogoutOutlined, UserOutlined, MenuFoldOutlined,
-  MenuUnfoldOutlined, HeartFilled,
+  MenuUnfoldOutlined, HeartFilled, RobotOutlined, ApiOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../../context/AuthContext';
+import NotificationsBell from '../ai/NotificationsBell';
 
 const { Sider, Header, Content } = AntLayout;
 const { Text } = Typography;
@@ -52,6 +53,20 @@ function Layout({ children }) {
     });
   }
 
+  navItems.push({
+    key: `${baseUrl}/assistant`,
+    icon: <RobotOutlined />,
+    label: <Link to={`${baseUrl}/assistant`}>AI Assistant</Link>,
+  });
+
+  if (user.role === 'admin') {
+    navItems.push({
+      key: `${baseUrl}/ai-ops`,
+      icon: <ApiOutlined />,
+      label: <Link to={`${baseUrl}/ai-ops`}>AI Operations</Link>,
+    });
+  }
+
   const userMenuItems = [
     {
       key: 'logout',
@@ -84,6 +99,7 @@ function Layout({ children }) {
         {/* Logo */}
         <div style={{
           height: 64,
+          lineHeight: 'normal',
           display: 'flex',
           alignItems: 'center',
           justifyContent: collapsed ? 'center' : 'flex-start',
@@ -119,6 +135,7 @@ function Layout({ children }) {
           justifyContent: 'space-between',
           boxShadow: '0 1px 4px rgba(0,21,41,0.08)',
           height: 64,
+          lineHeight: 'normal',
         }}>
           <Button
             type="text"
@@ -127,6 +144,8 @@ function Layout({ children }) {
             style={{ fontSize: 16, width: 40, height: 40 }}
           />
 
+          <Space size={12}>
+          <NotificationsBell />
           <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
             <Space style={{ cursor: 'pointer' }}>
               <Avatar
@@ -146,6 +165,7 @@ function Layout({ children }) {
               </Space>
             </Space>
           </Dropdown>
+          </Space>
         </Header>
 
         <Content className="page-content">
