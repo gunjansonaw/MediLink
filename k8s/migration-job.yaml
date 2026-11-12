@@ -1,0 +1,41 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: backend-migrate
+  namespace: medilink
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        app: backend-migrate
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:15-alpine
+          command: ["sh", "-c", "until pg_isready -h postgres -p 5432 -U \"$DB_USER\" -d \"$DB_NAME\"; do echo waiting for PostgreSQL; sleep 2; done"]
+          envFrom:
+            - secretRef:
+                name: medilink-secrets
+            - configMapRef:
+                name: medilink-config
+      containers:
+        - name: migrate
+          image: medilink-backend:local
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args: ["python manage.py migrate --noinput"]
+          envFrom:
+            - secretRef:
+                name: medilink-secrets
+            - configMapRef:
+                name: medilink-config
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi

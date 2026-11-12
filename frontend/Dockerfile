@@ -7,7 +7,8 @@ WORKDIR /app
 
 COPY package*.json ./
 # Reproducible install from the lockfile
-RUN npm ci --legacy-peer-deps --no-audit --no-fund
+RUN npm ci --legacy-peer-deps --no-audit --no-fund \
+      --fetch-retries=5 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000
 
 COPY . ./
 
@@ -28,6 +29,8 @@ COPY --from=builder /app/build /usr/share/nginx/html
 # The image renders /etc/nginx/templates/*.template with envsubst at startup
 COPY nginx.conf /etc/nginx/templates/default.conf.template
 
-ENV BACKEND_UPSTREAM=http://backend:8000
+ENV BACKEND_UPSTREAM=http://backend:8000 \
+    # Exports NGINX_LOCAL_RESOLVERS (from /etc/resolv.conf) for nginx.conf's resolver
+    NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1
 
 EXPOSE 8080

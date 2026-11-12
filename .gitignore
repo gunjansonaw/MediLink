@@ -40,6 +40,9 @@ __pycache__/
 # Agent configuration
 .agents/
 
+# Load test output (regenerated on every run)
+loadtest/reports/
+
 # Kubernetes overlay inputs with real values (examples are committed)
 deploy/k8s/overlays/oracle/params.env
 deploy/k8s/overlays/oracle/secrets.env

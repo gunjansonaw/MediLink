@@ -33,8 +33,12 @@ spec:
           ports:
             - {name: http, containerPort: 8080}
           env:
-            # nginx proxies /api, /admin and /django-static to the backend Service
-            - {name: BACKEND_UPSTREAM, value: "http://backend:8000"}
+            # nginx proxies /api, /admin and /django-static to the backend Service.
+            # It resolves the name at request time with its own resolver, which
+            # ignores resolv.conf search domains, so this must be fully qualified.
+            - name: POD_NAMESPACE
+              valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+            - {name: BACKEND_UPSTREAM, value: "http://backend.$(POD_NAMESPACE).svc.cluster.local:8000"}
           readinessProbe:
             httpGet: {path: /healthz, port: http}
             periodSeconds: 10

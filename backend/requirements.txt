@@ -9,6 +9,10 @@ Pillow>=10.2.0
 gunicorn==21.2.0
 whitenoise==6.6.0
 celery==5.3.4
+# Pin kombu (Celery's transport layer) to the series that matches Celery 5.3.
+# Left unpinned, pip installs kombu 5.7+, which needs redis-py>=6.1, so the
+# worker and beat crash at startup with kombu.exceptions.VersionMismatch.
+kombu==5.3.7
 redis==5.0.1
 django-filter==23.3
 # 1.21.7 imported pkg_resources, which current setuptools no longer ships
