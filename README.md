@@ -53,26 +53,32 @@ Agents run on the Claude API (default model `claude-opus-5-5`, configurable with
 
 ---
 
-## 🏛 Architecture Diagram
+## 🏛 Architecture
 
 ```
-┌────────────────────────────────────────────────────────┐
-│                   Client Browser                       │
-└──────────────┬─────────────────────────┬───────────────┘
-               │ Port 3000               │ Port 8000
-               ▼                         ▼
-    ┌──────────────────────┐  Proxy   ┌──────────────────────┐
-    │  React 18 + Nginx    │ ───────> │  Django REST API     │
-    │  (Static SPA Server) │  /api/   │  (Gunicorn WSGI)     │
-    └──────────────────────┘          └──────────┬───────────┘
-                                                 │
-                        ┌────────────────────────┼────────────────────────┐
-                        ▼                        ▼                        ▼
-               ┌────────────────┐       ┌────────────────┐       ┌────────────────┐
-               │  PostgreSQL 15 │       │  Redis 7 Cache │ <──── │ Celery Worker  │
-               │  (Primary DB)  │       │  & Message Bus │ <──── │ & Celery Beat  │
-               └────────────────┘       └────────────────┘       └────────────────┘
+          Browser: patients · doctors · admins
+                          │ HTTPS
+                          ▼
+  Ingress: ingress-nginx (kind) · Traefik + TLS (k3s)   [Compose: port 3000]
+                          │
+                          ▼
+  React 18 SPA on nginx: serves the app, proxies /api /admin /swagger
+                          │ /api
+                          ▼
+  Django REST API (gunicorn) ───── agent chat, tool use ─────► Claude API
+      │               │                                           ▲
+      │ SQL           │ enqueue                                   │
+      ▼               ▼                                           │
+  PostgreSQL 15    Redis 7 ◄─── schedule ─── Celery beat          │
+      ▲               │                                           │
+      │ ORM           │ consume                                   │
+      │               ▼                                           │
+      └──────────  Celery worker ── briefs · labs · agents ───────┘
 ```
+
+- **One origin.** nginx serves the SPA and proxies the API, so the HttpOnly JWT cookies and CSRF work without any cross-site setup. It resolves the backend per request, so a DNS hiccup or a backend restart returns a brief 502 instead of crash-looping the frontend.
+- **Background work.** Model saves (lab results, near-term appointments) and the beat schedule (hourly: overdue invoices, reminders, pre-visit briefs; daily: collections, care follow-ups) enqueue Celery tasks on Redis.
+- **Interactive diagram** with guided views and links to the source of each component: [`docs/architecture/medilink-architecture.html`](./docs/architecture/medilink-architecture.html) (open it in a browser; it is rendered from [`medilink.architecture.json`](./docs/architecture/medilink.architecture.json)).
 
 ---
 
@@ -102,6 +108,34 @@ To enable the Claude-powered agents, set `ANTHROPIC_API_KEY` (e.g. in a `.env` f
 
 ### ☸️ Kubernetes & free cloud hosting
 Kustomize manifests for a local kind cluster and for a **free, always-on k3s cluster on Oracle Cloud's Always Free tier** (HTTPS via Let's Encrypt, multi-arch images built by GitHub Actions) live in [`deploy/k8s`](./deploy/k8s). Step-by-step guide: **[DEPLOYMENT.md](./DEPLOYMENT.md)**.
+
+On the local kind cluster the app is served at **http://medilink.localtest.me:8080** (`localtest.me` always resolves to 127.0.0.1).
+
+---
+
+## 📈 Load Testing (`loadtest/`)
+
+[Locust](https://locust.io) scenarios replay the API calls the frontend makes for each role: 6 patients : 3 doctors : 1 admin, about 34 reads per write and one request per second per user, including the row-locked book-and-cancel path. Claude-backed endpoints are left out (paid and throttled).
+
+```bash
+# Quick run against Docker Compose
+cd loadtest && locust --headless -u 50 -r 5 -t 3m --html reports/run.html
+
+# Capacity test inside Kubernetes: distributed Locust in its own namespace, traffic
+# through the ingress, stepping toward 100,000 users and stopping at the first
+# saturated step (>5% failures or p95 > 5 s)
+cd loadtest && ./k8s/run.sh
+```
+
+Measured so far on a 12-core laptop (app and load generator share the machine):
+
+| Setup | Users | Requests/s | Failures | p50 | p95 | p99 |
+|---|---|---|---|---|---|---|
+| Docker Compose | 50 | 42 | 0.01% | 34 ms | 85 ms | 160 ms |
+| kind, 1 backend pod | 40 | 39 | 0% | 28 ms | 72 ms | 120 ms |
+| kind, 1 backend pod, ramp to 100 | ≤100 | 84 | 0% | 34 ms | 130 ms | 250 ms |
+
+The full stepped run, which finds where one backend pod saturates, is the next measurement. Guide, settings and cleanup of test bookings: **[loadtest/README.md](./loadtest/README.md)**.
 
 ---
 

@@ -1,0 +1,226 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: medilink
+spec:
+  selector:
+    app: backend
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: medilink
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      terminationGracePeriodSeconds: 45
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:15-alpine
+          command: ["sh", "-c", "until pg_isready -h postgres -p 5432 -U \"$DB_USER\" -d \"$DB_NAME\"; do echo waiting for PostgreSQL; sleep 2; done"]
+          envFrom:
+            - secretRef:
+                name: medilink-secrets
+            - configMapRef:
+                name: medilink-config
+      containers:
+        - name: backend
+          image: medilink-backend:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - secretRef:
+                name: medilink-secrets
+            - configMapRef:
+                name: medilink-config
+          command: ["/bin/sh", "-c"]
+          args: ["exec gunicorn medilink.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 120 --graceful-timeout 30"]
+          readinessProbe:
+            httpGet:
+              path: /swagger/
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /swagger/
+              port: http
+            initialDelaySeconds: 45
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: celery-worker
+  namespace: medilink
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: celery-worker
+  template:
+    metadata:
+      labels:
+        app: celery-worker
+    spec:
+      terminationGracePeriodSeconds: 60
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:15-alpine
+          command: ["sh", "-c", "until pg_isready -h postgres -p 5432 -U \"$DB_USER\" -d \"$DB_NAME\"; do echo waiting for PostgreSQL; sleep 2; done"]
+          envFrom:
+            - secretRef:
+                name: medilink-secrets
+            - configMapRef:
+                name: medilink-config
+      containers:
+        - name: worker
+          image: medilink-backend:local
+          imagePullPolicy: IfNotPresent
+          command: ["celery", "-A", "medilink", "worker", "-l", "info", "--concurrency=2"]
+          envFrom:
+            - secretRef:
+                name: medilink-secrets
+            - configMapRef:
+                name: medilink-config
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: celery-beat
+  namespace: medilink
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: celery-beat
+  template:
+    metadata:
+      labels:
+        app: celery-beat
+    spec:
+      terminationGracePeriodSeconds: 30
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:15-alpine
+          command: ["sh", "-c", "until pg_isready -h postgres -p 5432 -U \"$DB_USER\" -d \"$DB_NAME\"; do echo waiting for PostgreSQL; sleep 2; done"]
+          envFrom:
+            - secretRef:
+                name: medilink-secrets
+            - configMapRef:
+                name: medilink-config
+      containers:
+        - name: beat
+          image: medilink-backend:local
+          imagePullPolicy: IfNotPresent
+          command: ["celery", "-A", "medilink", "beat", "-l", "info"]
+          envFrom:
+            - secretRef:
+                name: medilink-secrets
+            - configMapRef:
+                name: medilink-config
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 384Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: medilink
+spec:
+  selector:
+    app: frontend
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: medilink
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+        - name: frontend
+          image: medilink-frontend:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
