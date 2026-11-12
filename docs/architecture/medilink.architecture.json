@@ -1,0 +1,393 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "MediLink System Architecture",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1270,
+      640
+    ],
+    "repository": {
+      "url": "https://github.com/gunjansonaw/MediLink",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "2a42a1f0ae6568ef141cdd4230fd07b1dbdb2c9f"
+    },
+    "views": [
+      {
+        "id": "request-path",
+        "label": "Request path",
+        "focus": [
+          "users",
+          "ingress",
+          "frontend",
+          "backend",
+          "postgres"
+        ],
+        "note": "One origin: the SPA and the API are served through the same host, so HttpOnly JWT cookies and CSRF need no cross-site setup."
+      },
+      {
+        "id": "ai-agents",
+        "label": "Claude agents",
+        "focus": [
+          "backend",
+          "worker",
+          "claude",
+          "postgres"
+        ],
+        "note": "Chat runs a tool-use loop in the API; briefs, lab insights and daily agents run in the Celery worker."
+      },
+      {
+        "id": "background-jobs",
+        "label": "Background jobs",
+        "focus": [
+          "backend",
+          "beat",
+          "redis",
+          "worker",
+          "postgres"
+        ],
+        "note": "Model signals and the beat schedule enqueue tasks on Redis; the worker drains them and writes results to Postgres."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "users",
+      "type": "external",
+      "label": "Users",
+      "sublabel": "browser · 3 roles",
+      "pos": [
+        20,
+        300
+      ],
+      "size": [
+        120,
+        64
+      ]
+    },
+    {
+      "id": "ingress",
+      "type": "cloud",
+      "label": "Ingress",
+      "sublabel": "ingress-nginx / Traefik",
+      "pos": [
+        224,
+        300
+      ],
+      "size": [
+        136,
+        64
+      ],
+      "sources": [
+        {
+          "path": "deploy/k8s/base/ingress.yaml",
+          "label": "Ingress"
+        }
+      ]
+    },
+    {
+      "id": "frontend",
+      "type": "frontend",
+      "label": "React SPA",
+      "sublabel": "nginx :8080",
+      "brand": "react",
+      "pos": [
+        444,
+        300
+      ],
+      "size": [
+        146,
+        64
+      ],
+      "sources": [
+        {
+          "path": "frontend/nginx.conf",
+          "label": "nginx proxy"
+        },
+        {
+          "path": "frontend/src/App.js",
+          "label": "SPA routes"
+        }
+      ]
+    },
+    {
+      "id": "backend",
+      "type": "backend",
+      "label": "Django API",
+      "sublabel": "DRF · gunicorn :8000",
+      "brand": "django",
+      "pos": [
+        674,
+        300
+      ],
+      "size": [
+        156,
+        64
+      ],
+      "tag": "migrate initContainer",
+      "sources": [
+        {
+          "path": "backend/medilink/urls.py",
+          "label": "API routes"
+        },
+        {
+          "path": "backend/ai_agents/agent.py",
+          "label": "Agent loop"
+        }
+      ]
+    },
+    {
+      "id": "postgres",
+      "type": "database",
+      "label": "PostgreSQL 15",
+      "sublabel": "StatefulSet · PVC",
+      "brand": "postgresql",
+      "pos": [
+        914,
+        300
+      ],
+      "size": [
+        146,
+        64
+      ],
+      "tag": "NetworkPolicy",
+      "sources": [
+        {
+          "path": "deploy/k8s/base/postgres.yaml",
+          "label": "StatefulSet"
+        }
+      ]
+    },
+    {
+      "id": "media",
+      "type": "database",
+      "label": "Media volume",
+      "sublabel": "PVC · /app/media",
+      "pos": [
+        444,
+        110
+      ],
+      "size": [
+        146,
+        64
+      ]
+    },
+    {
+      "id": "claude",
+      "type": "external",
+      "label": "Claude API",
+      "sublabel": "claude-opus-5-5",
+      "brand": "claude",
+      "pos": [
+        1110,
+        110
+      ],
+      "size": [
+        140,
+        64
+      ],
+      "sources": [
+        {
+          "path": "backend/ai_agents/llm.py",
+          "label": "LLM client"
+        }
+      ]
+    },
+    {
+      "id": "beat",
+      "type": "backend",
+      "label": "Celery beat",
+      "sublabel": "hourly + daily jobs",
+      "pos": [
+        444,
+        490
+      ],
+      "size": [
+        146,
+        64
+      ],
+      "sources": [
+        {
+          "path": "backend/medilink/settings.py",
+          "label": "Beat schedule"
+        }
+      ]
+    },
+    {
+      "id": "redis",
+      "type": "messagebus",
+      "label": "Redis 7",
+      "sublabel": "Celery broker :6379",
+      "brand": "redis",
+      "pos": [
+        674,
+        490
+      ],
+      "size": [
+        156,
+        64
+      ],
+      "tag": "NetworkPolicy"
+    },
+    {
+      "id": "worker",
+      "type": "backend",
+      "label": "Celery worker",
+      "sublabel": "agents · reminders",
+      "pos": [
+        914,
+        490
+      ],
+      "size": [
+        146,
+        64
+      ],
+      "sources": [
+        {
+          "path": "backend/ai_agents/tasks.py",
+          "label": "AI tasks"
+        },
+        {
+          "path": "backend/billing/tasks.py",
+          "label": "Billing tasks"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Kubernetes · namespace medilink",
+      "wraps": [
+        "ingress",
+        "frontend",
+        "backend",
+        "postgres",
+        "media",
+        "beat",
+        "redis",
+        "worker"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "users-https",
+      "from": "users",
+      "to": "ingress",
+      "label": "HTTPS",
+      "variant": "emphasis"
+    },
+    {
+      "id": "ingress-frontend",
+      "from": "ingress",
+      "to": "frontend",
+      "label": "all paths",
+      "variant": "emphasis"
+    },
+    {
+      "id": "frontend-backend",
+      "from": "frontend",
+      "to": "backend",
+      "label": "proxy /api",
+      "variant": "emphasis"
+    },
+    {
+      "id": "backend-postgres",
+      "from": "backend",
+      "to": "postgres",
+      "label": "SQL",
+      "variant": "emphasis"
+    },
+    {
+      "id": "backend-media",
+      "from": "backend",
+      "to": "media",
+      "label": "uploads",
+      "fromSide": "top",
+      "toSide": "right"
+    },
+    {
+      "id": "backend-claude",
+      "from": "backend",
+      "to": "claude",
+      "label": "agent chat · tool use",
+      "fromSide": "top",
+      "toSide": "left"
+    },
+    {
+      "id": "backend-redis",
+      "from": "backend",
+      "to": "redis",
+      "label": "enqueue",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [
+        752,
+        422
+      ]
+    },
+    {
+      "id": "beat-redis",
+      "from": "beat",
+      "to": "redis",
+      "label": "schedule",
+      "variant": "dashed"
+    },
+    {
+      "id": "redis-worker",
+      "from": "redis",
+      "to": "worker",
+      "label": "consume"
+    },
+    {
+      "id": "worker-postgres",
+      "from": "worker",
+      "to": "postgres",
+      "label": "ORM",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "worker-claude",
+      "from": "worker",
+      "to": "claude",
+      "label": "briefs · labs · agents",
+      "fromSide": "right",
+      "toSide": "bottom"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Edge → Django",
+      "items": [
+        "ingress-nginx on kind; Traefik + Let's Encrypt on Oracle k3s",
+        "nginx serves the SPA and proxies /api, /admin, /swagger",
+        "Apps: users, appointments, medical_records, billing, ai_agents"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Claude agents",
+      "items": [
+        "Role-checked tools; every call audited",
+        "propose_* tools only create approval cards",
+        "Emergency guardrail before any model call"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Background jobs",
+      "items": [
+        "Hourly: overdue invoices, reminders, pre-visit briefs",
+        "Daily: collections and care follow-ups",
+        "LabTest / Appointment saves enqueue AI tasks"
+      ]
+    }
+  ]
+}
