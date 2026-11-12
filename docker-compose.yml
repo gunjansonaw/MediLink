@@ -6,14 +6,18 @@
 x-backend-env: &backend-env
   SECRET_KEY: ${SECRET_KEY:-django-insecure-local-compose-only-change-me}
   DEBUG: ${DEBUG:-True}
-  ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,backend,frontend}
+  # The local names are always allowed. Values from a .env next to this file are
+  # added to them, not used instead of them. Otherwise a leftover production
+  # value (e.g. ALLOWED_HOSTS=yourdomain.com) makes Django reject the health check
+  # and every request through the frontend proxy with 400, and the stack never becomes healthy.
+  ALLOWED_HOSTS: localhost,127.0.0.1,backend,frontend,${ALLOWED_HOSTS:-}
   DB_NAME: ${DB_NAME:-medilink}
   DB_USER: ${DB_USER:-postgres}
   DB_PASSWORD: ${DB_PASSWORD:-postgrespassword}
   DB_HOST: db
   DB_PORT: 5432
-  CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
-  CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+  CORS_ALLOWED_ORIGINS: http://localhost:3000,http://127.0.0.1:3000,${CORS_ALLOWED_ORIGINS:-}
+  CSRF_TRUSTED_ORIGINS: http://localhost:3000,http://127.0.0.1:3000,${CSRF_TRUSTED_ORIGINS:-}
   COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
   COOKIE_SECURE: ${COOKIE_SECURE:-False}
   CELERY_BROKER_URL: redis://redis:6379/0
