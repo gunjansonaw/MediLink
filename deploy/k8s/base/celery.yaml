@@ -27,6 +27,17 @@ spec:
           envFrom:
             - configMapRef: {name: medilink-config}
             - secretRef: {name: medilink-secrets}
+          # Restart the worker if it stops answering broker pings. On a fresh
+          # deploy (worker and Redis starting together) we saw a worker log
+          # "ready" yet never consume a task or answer a ping until restarted.
+          # Without this probe, background jobs stop silently.
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "celery -A medilink inspect ping -d \"celery@$HOSTNAME\" --timeout 10"]
+            initialDelaySeconds: 60
+            periodSeconds: 60
+            timeoutSeconds: 30
+            failureThreshold: 3
           resources:
             requests: {cpu: 100m, memory: 256Mi}
             limits: {memory: 768Mi}
