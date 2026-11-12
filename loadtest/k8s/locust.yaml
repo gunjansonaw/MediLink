@@ -1,0 +1,65 @@
+# Distributed Locust inside the cluster, in its own namespace so it can be
+# removed in one step:  kubectl delete namespace loadtest
+#
+# Traffic takes the same path as a browser: the worker pods resolve
+# medilink.localtest.me to the ingress controller (hostAliases, filled in by
+# run.sh), so every request goes ingress -> frontend nginx -> Django.
+#
+# Use run.sh rather than applying this file by hand (the master Job is in master.yaml).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: loadtest
+  labels: {app.kubernetes.io/part-of: medilink-loadtest}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: locust-master
+  namespace: loadtest
+spec:
+  selector: {app: locust-master}
+  ports:
+    - {name: comm, port: 5557}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: locust-worker
+  namespace: loadtest
+spec:
+  replicas: 0   # run.sh scales this up once the master is ready
+  selector:
+    matchLabels: {app: locust-worker}
+  template:
+    metadata:
+      labels: {app: locust-worker}
+    spec:
+      hostAliases:
+        - ip: INGRESS_IP
+          hostnames: [medilink.localtest.me]
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: worker
+          image: locustio/locust:2.47.0
+          workingDir: /mnt/locust
+          args: ["-f", "locustfile.py,shape_stepped.py", "--worker", "--master-host", "locust-master"]
+          envFrom:
+            - configMapRef: {name: locust-settings}
+          # One Locust worker is a single process: it can use at most one core.
+          # The memory cap makes an overloaded worker get OOM-killed instead of
+          # starving the app it is testing.
+          resources:
+            requests: {cpu: 500m, memory: 256Mi}
+            limits: {cpu: "1", memory: 1Gi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"]}
+          volumeMounts:
+            - {name: locustfiles, mountPath: /mnt/locust}
+      volumes:
+        - name: locustfiles
+          configMap: {name: locustfiles}

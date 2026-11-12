@@ -1,0 +1,51 @@
+# Locust master (one run). run.sh applies this only after the workers are
+# up and stable: a worker restart mid-run makes the master stop the test.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: locust-master
+  namespace: loadtest
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels: {app: locust-master}
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: master
+          image: locustio/locust:2.47.0
+          workingDir: /mnt/locust
+          command: ["sh", "-c"]
+          # Keep the pod alive after the run so run.sh can copy the reports out
+          args:
+            - >-
+              locust -f locustfile.py,shape_stepped.py --master --headless
+              --expect-workers "$WORKERS" --expect-workers-max-wait 180
+              --host http://medilink.localtest.me
+              --csv /reports/run --html /reports/report.html $LOCUST_EXTRA_ARGS;
+              echo "LOCUST_EXIT=$?"; touch /reports/DONE; sleep 3600
+          envFrom:
+            - configMapRef: {name: locust-settings}
+          env:
+            - {name: STEP_REPORT, value: /reports/steps.csv}
+          ports:
+            - {containerPort: 5557}
+          resources:
+            requests: {cpu: 250m, memory: 256Mi}
+            limits: {cpu: "1", memory: 1Gi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"]}
+          volumeMounts:
+            - {name: locustfiles, mountPath: /mnt/locust}
+            - {name: reports, mountPath: /reports}
+      volumes:
+        - name: locustfiles
+          configMap: {name: locustfiles}
+        - name: reports
+          emptyDir: {}
