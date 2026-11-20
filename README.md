@@ -10,6 +10,16 @@
 
 **MediLink** is a modern, scalable, containerized SaaS platform engineered for clinical workflows, multi-role hospital management (Patients, Doctors, Administrators), electronic health records (EHR), scheduling, and billing.
 
+## ⚡ At a glance
+
+- **10 Claude-powered agents** on a hand-written tool-use loop, from a patient booking assistant to an admin analytics agent ([details](#-agentic-ai-features-backendai_agents))
+- **Safe by design:** RBAC on every tool, human approval before any write, every tool call audit-logged, deterministic medical guardrails, and a rules-only mode when no API key is set
+- **Production-style deployment:** 6 services, Kubernetes (kind + k3s on Oracle Cloud) with Kustomize, TLS, NetworkPolicies, non-root read-only containers, GitHub Actions CI/CD
+- **Tested and measured:** 45 tests; Locust load test at **84 req/s, 0% failures, p95 130 ms** on a single backend pod ([results](#-load-testing-loadtest))
+- **Built solo, end to end:** data model, REST API, agents, React SPA, infra
+
+> **Why this project:** most LLM demos skip what happens when the model is wrong. In healthcare that matters, so the focus here is everything *around* the model: permissions, approvals, audit trails and safe fallbacks.
+
 ---
 
 ## 🌟 Key Architecture & SaaS Features
